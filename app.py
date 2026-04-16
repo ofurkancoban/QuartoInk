@@ -25,8 +25,10 @@ if not _secret:
     )
     _secret = "dev-secret-key-change-in-production"
 app.config["SECRET_KEY"] = _secret
+_db_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "instance")
+os.makedirs(_db_dir, exist_ok=True)
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
-    "DATABASE_URL", "sqlite:///annotations.db"
+    "DATABASE_URL", f"sqlite:///{os.path.join(_db_dir, 'annotations.db')}"
 )
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["UPLOAD_FOLDER"] = os.path.join(os.path.dirname(__file__), "uploads")
