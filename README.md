@@ -1,6 +1,6 @@
 # Quarto Ink 🖋️
-
-![Quarto Ink Cover](/Users/ofurkancoban/.gemini/antigravity/brain/5a1aa3e7-63cf-435f-a724-93b304a8d3aa/quarto_ink_cover_v2_1776768982943.png)
+  
+![Quarto Ink Cover](assets/cover.png)
 
 <p align="center">
   <strong>The Professional Annotation Orchestrator for Quarto & Reveal.js</strong><br>
