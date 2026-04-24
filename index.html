@@ -5594,32 +5594,13 @@ function setupEventListeners() {
     ['lasso','pen','highlighter','arrow','rect','circle','text','eraser'].forEach(t => {
         const b = _$(`#btn-${t}`);
         if (!b) return;
-        let toolClickSuppressTimer = null;
         b.addEventListener('pointerdown', (e) => {
             if (e.button !== 0) return;
             e.preventDefault();
-            if (toolClickSuppressTimer) clearTimeout(toolClickSuppressTimer);
-            b._gnSuppressNextClick = true;
-            toolClickSuppressTimer = setTimeout(() => {
-                b._gnSuppressNextClick = false;
-                toolClickSuppressTimer = null;
-            }, 900);
             activateDrawingTool(t, b);
         });
         b.addEventListener('click', (e) => {
-            if (b._gnSuppressNextClick) {
-                b._gnSuppressNextClick = false;
-                if (toolClickSuppressTimer) {
-                    clearTimeout(toolClickSuppressTimer);
-                    toolClickSuppressTimer = null;
-                }
-                return;
-            }
-            activateDrawingTool(t, b);
-        });
-        b.addEventListener('keydown', (e) => {
-            if (e.key !== 'Enter' && e.key !== ' ') return;
-            e.preventDefault();
+            if (e.pointerType) return;
             activateDrawingTool(t, b);
         });
     });
@@ -5820,9 +5801,8 @@ function handleKeyDown(e) {
         't': 'text', 'r': 'rect', 'c': 'circle', 'a': 'arrow', 's': 'lasso' 
     };
     if (toolMap[lowerKey] && !e.ctrlKey && !e.metaKey) {
-        const tn = toolMap[lowerKey];
-        const btn = _$(`#btn-${tn}`);
-        if (btn) activateDrawingTool(tn, btn);
+        const btn = _$(`#btn-${toolMap[lowerKey]}`);
+        if (btn) btn.click();
     }
 
     // Sidebar Toggle (Explicit check)
