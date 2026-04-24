@@ -3032,7 +3032,9 @@ const state = {
     freehandSnapped: false,
     snapStartPoint: null,
     /** TimeStamp of the pointerdown that opened the current stroke; stale pointerups sort before this on Safari/Pencil. */
-    strokeDownTimeStamp: null
+    strokeDownTimeStamp: null,
+    /** performance.now() when current stroke started (guards spurious lostpointercapture right after tool→canvas). */
+    strokeWallClockStart: null
 };
 
 // --- COORDINATE NORMALIZATION ---
@@ -4501,6 +4503,7 @@ function resetDrawingGestureState() {
     state._fingerSwipe = null;
     state.snapshot = null;
     state.strokeDownTimeStamp = null;
+    state.strokeWallClockStart = null;
     if (canvas && pid !== undefined) {
         try { canvas.releasePointerCapture(pid); } catch (_e) {}
     }
@@ -4530,12 +4533,20 @@ function activateDrawingTool(t, b) {
     _$$('.gn-text-only').forEach(el => { el.style.display = (t === 'text') ? 'block' : 'none'; });
 }
 
-/** Toolbar/title hits: a late pointerup from a tool tap must not end a new canvas stroke (same pointerId on Safari / Pencil). */
-function pointerUpTargetIsChromeWhileDrawing(e) {
-    const t = e.target;
-    if (!t || !t.closest) return false;
-    if (t === canvas || (canvas && canvas.contains(t))) return false;
-    return !!t.closest('#goodnotes-top-bar, #app-title-bar');
+/**
+ * True if this pointerup belongs to the app chrome (toolbar/title), not the stroke on canvas.
+ * Uses composedPath — Safari often mis-assigns event.target for delayed toolbar releases.
+ */
+function pointerUpComesFromAppChrome(e) {
+    const path = typeof e.composedPath === 'function' ? e.composedPath() : (e.target ? [e.target] : []);
+    for (let i = 0; i < path.length; i++) {
+        const n = path[i];
+        if (!n || n.nodeType !== 1) continue;
+        if (n === canvas) return false;
+        if (canvas && canvas.contains(n)) return false;
+        if (n.closest && (n.closest('#goodnotes-top-bar') || n.closest('#app-title-bar'))) return true;
+    }
+    return false;
 }
 
 function startDrawing(e) {
@@ -4603,6 +4614,7 @@ function startDrawing(e) {
     state.isDragging = true;
     state.activePointerId = e.pointerId;
     state.strokeDownTimeStamp = e.timeStamp;
+    state.strokeWallClockStart = performance.now();
     try { canvas.setPointerCapture(e.pointerId); } catch(_e) {}
     state.startX = p.x; state.startY = p.y; 
     const normP = toNormalized(p.x, p.y);
@@ -4637,6 +4649,7 @@ function startDrawing(e) {
             deleteSelectedAnnotations();
             state.isDragging = false;
             state.strokeDownTimeStamp = null;
+            state.strokeWallClockStart = null;
             try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
             state.activePointerId = undefined;
             return;
@@ -4850,10 +4863,11 @@ function stopDrawing(e) {
     if (tsDown != null && Number.isFinite(tsUp) && Number.isFinite(tsDown) && tsUp < tsDown - 0.5) {
         return;
     }
-    if (pointerUpTargetIsChromeWhileDrawing(e)) return;
+    if (pointerUpComesFromAppChrome(e)) return;
     state.isDragging = false;
     state.activePointerId = undefined;
     state.strokeDownTimeStamp = null;
+    state.strokeWallClockStart = null;
     try { canvas.releasePointerCapture(e.pointerId); } catch(_e) {}
     const p = getPos(e);
     clearTimeout(state.shapeSnapTimer);
@@ -5762,11 +5776,19 @@ function setupEventListeners() {
 
     canvas.addEventListener('pointerdown', startDrawing, { passive: false });
     canvas.addEventListener('pointermove', draw, { passive: false });
-    window.addEventListener('pointerup', stopDrawing);
+    canvas.addEventListener('pointerup', stopDrawing, { passive: false });
+    window.addEventListener('pointerup', function strokeEndOutsideCanvas(e) {
+        if (!state.isDragging) return;
+        if (state.activePointerId !== undefined && e.pointerId !== state.activePointerId) return;
+        if (pointerUpComesFromAppChrome(e)) return;
+        stopDrawing(e);
+    });
     canvas.addEventListener('pointercancel', (e) => {
         if (state.isDragging) {
             state.isDragging = false;
             state.activePointerId = undefined;
+            state.strokeDownTimeStamp = null;
+            state.strokeWallClockStart = null;
             state.currentPath = [];
             state.lastStaticP = null;
             clearTimeout(state.freehandSnapTimer);
@@ -5777,10 +5799,14 @@ function setupEventListeners() {
     });
     canvas.addEventListener('lostpointercapture', (e) => {
         if (state.activePointerId === undefined || state.activePointerId !== e.pointerId) return;
+        const t0 = state.strokeWallClockStart;
+        if (t0 != null && performance.now() - t0 < 85) return;
         clearTimeout(state.freehandSnapTimer);
         clearTimeout(state.shapeSnapTimer);
         state.isDragging = false;
         state.activePointerId = undefined;
+        state.strokeDownTimeStamp = null;
+        state.strokeWallClockStart = null;
         state.freehandSnapped = false;
         state.shapeSnapped = false;
         state.currentPath = [];
