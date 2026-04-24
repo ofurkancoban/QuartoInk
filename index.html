@@ -3030,11 +3030,7 @@ const state = {
     slideMetrics: { x: 0, y: 0, width: 1, height: 1, scale: 1 },
     freehandSnapTimer: null,
     freehandSnapped: false,
-    snapStartPoint: null,
-    /** TimeStamp of the pointerdown that opened the current stroke; stale pointerups sort before this on Safari/Pencil. */
-    strokeDownTimeStamp: null,
-    /** performance.now() when current stroke started (guards spurious lostpointercapture right after tool→canvas). */
-    strokeWallClockStart: null
+    snapStartPoint: null
 };
 
 // --- COORDINATE NORMALIZATION ---
@@ -4501,52 +4497,10 @@ function resetDrawingGestureState() {
     state.lassoPath = [];
     state.lastStaticP = null;
     state._fingerSwipe = null;
-    state.snapshot = null;
-    state.strokeDownTimeStamp = null;
-    state.strokeWallClockStart = null;
     if (canvas && pid !== undefined) {
         try { canvas.releasePointerCapture(pid); } catch (_e) {}
     }
     if (ctx) redraw();
-}
-
-/** Apply tool switch immediately (pointerdown) so a delayed click cannot reset mid-stroke after fast tool→canvas gestures. */
-function activateDrawingTool(t, b) {
-    resetDrawingGestureState();
-    state.tool = t;
-    document.body.dataset.tool = t;
-    _$$('.gn-tool-btn').forEach(x => x.classList.remove('active'));
-    if (b) b.classList.add('active');
-    state.isDrawingMode = true;
-    syncModeUI();
-    if (state.toolWidths[t] !== undefined) {
-        state.strokeWidth = state.toolWidths[t];
-        syncThicknessUI();
-    }
-    syncColorUI();
-    const pillIcon = _$('#pill-icon');
-    const toolIcon = b && b.querySelector('svg');
-    if (pillIcon && toolIcon) {
-        pillIcon.innerHTML = toolIcon.innerHTML;
-        pillIcon.setAttribute('viewBox', toolIcon.getAttribute('viewBox') || '0 0 24 24');
-    }
-    _$$('.gn-text-only').forEach(el => { el.style.display = (t === 'text') ? 'block' : 'none'; });
-}
-
-/**
- * True if this pointerup belongs to the app chrome (toolbar/title), not the stroke on canvas.
- * Uses composedPath — Safari often mis-assigns event.target for delayed toolbar releases.
- */
-function pointerUpComesFromAppChrome(e) {
-    const path = typeof e.composedPath === 'function' ? e.composedPath() : (e.target ? [e.target] : []);
-    for (let i = 0; i < path.length; i++) {
-        const n = path[i];
-        if (!n || n.nodeType !== 1) continue;
-        if (n === canvas) return false;
-        if (canvas && canvas.contains(n)) return false;
-        if (n.closest && (n.closest('#goodnotes-top-bar') || n.closest('#app-title-bar'))) return true;
-    }
-    return false;
 }
 
 function startDrawing(e) {
@@ -4613,8 +4567,6 @@ function startDrawing(e) {
     
     state.isDragging = true;
     state.activePointerId = e.pointerId;
-    state.strokeDownTimeStamp = e.timeStamp;
-    state.strokeWallClockStart = performance.now();
     try { canvas.setPointerCapture(e.pointerId); } catch(_e) {}
     state.startX = p.x; state.startY = p.y; 
     const normP = toNormalized(p.x, p.y);
@@ -4645,15 +4597,7 @@ function startDrawing(e) {
     }
     
     if (state.tool === 'lasso') {
-        if (isPointInDeleteHandle(p)) {
-            deleteSelectedAnnotations();
-            state.isDragging = false;
-            state.strokeDownTimeStamp = null;
-            state.strokeWallClockStart = null;
-            try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
-            state.activePointerId = undefined;
-            return;
-        }
+        if (isPointInDeleteHandle(p)) { deleteSelectedAnnotations(); state.isDragging = false; return; }
         if (isPointInResizeHandle(p)) { state.isResizingSelection = true; state.resizeOrigin = { x: getSelectionBoundingBox().minX, y: getSelectionBoundingBox().minY }; }
         else if (isPointInLassoSelection(p)) { state.isMovingSelection = true; }
         else { state.selectedAnnotations = []; state.lassoPath = [p]; }
@@ -4858,16 +4802,8 @@ function draw(e) {
 function stopDrawing(e) {
     if (!state.isDragging) return;
     if (state.activePointerId !== undefined && e.pointerId !== state.activePointerId) return;
-    const tsDown = state.strokeDownTimeStamp;
-    const tsUp = e.timeStamp;
-    if (tsDown != null && Number.isFinite(tsUp) && Number.isFinite(tsDown) && tsUp < tsDown - 0.5) {
-        return;
-    }
-    if (pointerUpComesFromAppChrome(e)) return;
     state.isDragging = false;
     state.activePointerId = undefined;
-    state.strokeDownTimeStamp = null;
-    state.strokeWallClockStart = null;
     try { canvas.releasePointerCapture(e.pointerId); } catch(_e) {}
     const p = getPos(e);
     clearTimeout(state.shapeSnapTimer);
@@ -5633,35 +5569,26 @@ function setupEventListeners() {
 
     ['lasso','pen','highlighter','arrow','rect','circle','text','eraser'].forEach(t => {
         const b = _$(`#btn-${t}`);
-        if (!b) return;
-        let toolClickSuppressTimer = null;
-        b.addEventListener('pointerdown', (e) => {
-            if (e.button !== 0) return;
-            e.preventDefault();
-            if (toolClickSuppressTimer) clearTimeout(toolClickSuppressTimer);
-            b._gnSuppressNextClick = true;
-            toolClickSuppressTimer = setTimeout(() => {
-                b._gnSuppressNextClick = false;
-                toolClickSuppressTimer = null;
-            }, 900);
-            activateDrawingTool(t, b);
-        });
-        b.addEventListener('click', (e) => {
-            if (b._gnSuppressNextClick) {
-                b._gnSuppressNextClick = false;
-                if (toolClickSuppressTimer) {
-                    clearTimeout(toolClickSuppressTimer);
-                    toolClickSuppressTimer = null;
-                }
-                return;
+        if(b) b.onclick = () => {
+            resetDrawingGestureState();
+            state.tool = t; document.body.dataset.tool = t;
+            _$$('.gn-tool-btn').forEach(x => x.classList.remove('active')); b.classList.add('active');
+            state.isDrawingMode = true; syncModeUI();
+            // Restore per-tool thickness
+            if (state.toolWidths[t] !== undefined) {
+                state.strokeWidth = state.toolWidths[t];
+                syncThicknessUI();
             }
-            activateDrawingTool(t, b);
-        });
-        b.addEventListener('keydown', (e) => {
-            if (e.key !== 'Enter' && e.key !== ' ') return;
-            e.preventDefault();
-            activateDrawingTool(t, b);
-        });
+            syncColorUI();
+            // Update active icon in the settings pill (Visual only, no color change)
+            const pillIcon = _$('#pill-icon');
+            const toolIcon = b.querySelector('svg');
+            if (pillIcon && toolIcon) {
+                pillIcon.innerHTML = toolIcon.innerHTML;
+                pillIcon.setAttribute('viewBox', toolIcon.getAttribute('viewBox') || '0 0 24 24');
+            }
+            _$$('.gn-text-only').forEach(el => el.style.display = (t === 'text') ? 'block' : 'none');
+        };
     });
 
     _$$('.gn-color-swatch').forEach(s => {
@@ -5776,19 +5703,11 @@ function setupEventListeners() {
 
     canvas.addEventListener('pointerdown', startDrawing, { passive: false });
     canvas.addEventListener('pointermove', draw, { passive: false });
-    canvas.addEventListener('pointerup', stopDrawing, { passive: false });
-    window.addEventListener('pointerup', function strokeEndOutsideCanvas(e) {
-        if (!state.isDragging) return;
-        if (state.activePointerId !== undefined && e.pointerId !== state.activePointerId) return;
-        if (pointerUpComesFromAppChrome(e)) return;
-        stopDrawing(e);
-    });
+    window.addEventListener('pointerup', stopDrawing);
     canvas.addEventListener('pointercancel', (e) => {
         if (state.isDragging) {
             state.isDragging = false;
             state.activePointerId = undefined;
-            state.strokeDownTimeStamp = null;
-            state.strokeWallClockStart = null;
             state.currentPath = [];
             state.lastStaticP = null;
             clearTimeout(state.freehandSnapTimer);
@@ -5799,14 +5718,10 @@ function setupEventListeners() {
     });
     canvas.addEventListener('lostpointercapture', (e) => {
         if (state.activePointerId === undefined || state.activePointerId !== e.pointerId) return;
-        const t0 = state.strokeWallClockStart;
-        if (t0 != null && performance.now() - t0 < 85) return;
         clearTimeout(state.freehandSnapTimer);
         clearTimeout(state.shapeSnapTimer);
         state.isDragging = false;
         state.activePointerId = undefined;
-        state.strokeDownTimeStamp = null;
-        state.strokeWallClockStart = null;
         state.freehandSnapped = false;
         state.shapeSnapped = false;
         state.currentPath = [];
@@ -5872,9 +5787,8 @@ function handleKeyDown(e) {
         't': 'text', 'r': 'rect', 'c': 'circle', 'a': 'arrow', 's': 'lasso' 
     };
     if (toolMap[lowerKey] && !e.ctrlKey && !e.metaKey) {
-        const tn = toolMap[lowerKey];
-        const btn = _$(`#btn-${tn}`);
-        if (btn) activateDrawingTool(tn, btn);
+        const btn = _$(`#btn-${toolMap[lowerKey]}`);
+        if (btn) btn.click();
     }
 
     // Sidebar Toggle (Explicit check)
