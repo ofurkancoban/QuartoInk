@@ -1315,21 +1315,6 @@ h1, h2, h3 {
     border-radius: 2px;
 }
 
-/* iPad / touch: horizontal swipe on slide edges — above canvas so it works in Drawing mode too */
-.swipe-nav-zone {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    width: min(36%, 180px);
-    z-index: 12;
-    pointer-events: auto;
-    touch-action: none;
-    -webkit-user-select: none;
-    user-select: none;
-}
-.swipe-nav-zone-prev { left: 0; }
-.swipe-nav-zone-next { right: 0; }
-
 #content-frame {
     width: 100%;
     height: 100%;
@@ -2751,8 +2736,6 @@ body[data-tool="highlighter"] #brush-preview {
                     <div id="editor-stage" class="editor-stage">
                     <iframe id="content-frame" title="Presentation Viewer"></iframe>
                     <canvas id="canvas-overlay"></canvas>
-                    <div id="swipe-zone-prev" class="swipe-nav-zone swipe-nav-zone-prev" aria-hidden="true"></div>
-                    <div id="swipe-zone-next" class="swipe-nav-zone swipe-nav-zone-next" aria-hidden="true"></div>
                     <div id="eraser-cursor"></div>
                     <div id="brush-preview"></div>
                     <textarea id="text-input-overlay"></textarea>
@@ -3876,14 +3859,42 @@ window.processFileContent = function(content, file) {
                             } catch(e) { try { window.parent.postMessage({type:'BRIDGE_LOG', msg:'Bridge Notification Error: ' + e.message}, '*'); } catch(_e) {} }
                         };
                         
-                        let touchStartX = 0;
-                        window.addEventListener('touchstart', e => touchStartX = e.touches[0].clientX, { passive: true });
-                        window.addEventListener('touchend', e => {
-                            const diff = e.changedTouches[0].clientX - touchStartX;
-                            if (Math.abs(diff) > 100) {
-                                window.parent.postMessage({ type: 'NAVIGATE', key: diff > 0 ? 'Prev' : 'Next' }, '*');
+                        var __deckSwipeT0 = 0, __deckSwipeX0 = 0, __deckSwipeY0 = 0;
+                        window.addEventListener('touchstart', function(e) {
+                            if (e.touches.length !== 1) return;
+                            __deckSwipeX0 = e.touches[0].clientX;
+                            __deckSwipeY0 = e.touches[0].clientY;
+                            __deckSwipeT0 = performance.now();
+                        }, { passive: true });
+                        window.addEventListener('touchmove', function(e) {
+                            if (!__deckSwipeT0 || e.touches.length !== 1) return;
+                            var t = e.touches[0];
+                            var dx = t.clientX - __deckSwipeX0;
+                            var dy = t.clientY - __deckSwipeY0;
+                            var ax = Math.abs(dx), ay = Math.abs(dy);
+                            if (Math.max(ax, ay) > 22 && (ax > ay * 1.1 || ay > ax * 1.1)) e.preventDefault();
+                        }, { passive: false });
+                        window.addEventListener('touchend', function(e) {
+                            if (e.changedTouches.length !== 1) return;
+                            var t = e.changedTouches[0];
+                            var dt = performance.now() - __deckSwipeT0;
+                            var dx = t.clientX - __deckSwipeX0;
+                            var dy = t.clientY - __deckSwipeY0;
+                            __deckSwipeT0 = 0;
+                            var minD = 56, maxT = 700, ratio = 1.15;
+                            if (dt > maxT) return;
+                            var ax = Math.abs(dx), ay = Math.abs(dy);
+                            if (ax < minD && ay < minD) return;
+                            if (typeof window.__annotatorNavigate !== 'function') return;
+                            if (ax > ay * ratio) {
+                                if (dx < 0) window.__annotatorNavigate('Next');
+                                else window.__annotatorNavigate('Prev');
+                            } else if (ay > ax * ratio) {
+                                if (dy < 0) window.__annotatorNavigate('Next');
+                                else window.__annotatorNavigate('Prev');
                             }
                         }, { passive: true });
+                        window.addEventListener('touchcancel', function() { __deckSwipeT0 = 0; }, { passive: true });
 
                         window.addEventListener('resize', sendTabRects);
                         window.Reveal.on('slidechanged', () => notify(false));
@@ -4242,46 +4253,46 @@ function fallbackNavigateSlide(dir) {
     }
 }
 
-function setupSwipeNavGestures() {
-    const minDX = 56;
-    const maxDuration = 700;
-    const minHorizRatio = 1.2; /* |dx| must exceed |dy| * this */
-
-    function bindZone(zone) {
-        if (!zone) return;
-        zone.addEventListener('touchstart', (e) => {
-            if (e.touches.length !== 1) return;
-            const t = e.touches[0];
-            zone._inkSwipe = { x0: t.clientX, y0: t.clientY, t0: performance.now() };
-        }, { passive: true });
-        zone.addEventListener('touchmove', (e) => {
-            if (zone._inkSwipe && e.touches.length === 1) {
-                const t = e.touches[0];
-                const dx = t.clientX - zone._inkSwipe.x0;
-                const dy = t.clientY - zone._inkSwipe.y0;
-                if (Math.abs(dx) > 24 && Math.abs(dx) > Math.abs(dy) * minHorizRatio) e.preventDefault();
-            }
-        }, { passive: false });
-        zone.addEventListener('touchend', (e) => {
-            const s = zone._inkSwipe;
-            zone._inkSwipe = null;
-            if (!s) return;
-            if (e.changedTouches.length !== 1) return;
-            const t = e.changedTouches[0];
-            const dt = performance.now() - s.t0;
-            if (dt > maxDuration) return;
-            const dx = t.clientX - s.x0;
-            const dy = t.clientY - s.y0;
-            if (Math.abs(dx) < minDX) return;
-            if (Math.abs(dx) < Math.abs(dy) * minHorizRatio) return;
-            if (dx < 0) navigateSlide('Next');
-            else navigateSlide('Prev');
-        }, { passive: true });
-        zone.addEventListener('touchcancel', () => { zone._inkSwipe = null; }, { passive: true });
+function tryNavigateFromSwipe(dx, dy, dt) {
+    const minD = 56;
+    const maxT = 700;
+    const ratio = 1.15;
+    if (dt > maxT) return;
+    const ax = Math.abs(dx);
+    const ay = Math.abs(dy);
+    if (ax < minD && ay < minD) return;
+    if (ax > ay * ratio) {
+        if (dx < 0) navigateSlide('Next');
+        else navigateSlide('Prev');
+    } else if (ay > ax * ratio) {
+        if (dy < 0) navigateSlide('Next');
+        else navigateSlide('Prev');
     }
+}
 
-    bindZone(_$('#swipe-zone-prev'));
-    bindZone(_$('#swipe-zone-next'));
+function onFingerSwipePointerMove(e) {
+    if (!state._fingerSwipe || e.pointerId !== state._fingerSwipe.pid || e.pointerType !== 'touch') return;
+    const s = state._fingerSwipe;
+    const dx = e.clientX - s.x0;
+    const dy = e.clientY - s.y0;
+    const ax = Math.abs(dx);
+    const ay = Math.abs(dy);
+    if (Math.max(ax, ay) > 22 && (ax > ay * 1.1 || ay > ax * 1.1)) e.preventDefault();
+}
+
+function onFingerSwipePointerUp(e) {
+    if (!state._fingerSwipe || e.pointerId !== state._fingerSwipe.pid) return;
+    const s = state._fingerSwipe;
+    state._fingerSwipe = null;
+    try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
+    const dt = performance.now() - s.t0;
+    tryNavigateFromSwipe(e.clientX - s.x0, e.clientY - s.y0, dt);
+}
+
+function onFingerSwipePointerCancel(e) {
+    if (!state._fingerSwipe || e.pointerId !== state._fingerSwipe.pid) return;
+    state._fingerSwipe = null;
+    try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
 }
 
 function navigateSlide(dir) {
@@ -4489,8 +4500,13 @@ function startDrawing(e) {
         }
     }
 
-    // Block finger drawing on touch devices - only allow stylus (pen) and mouse (after tab handling)
-    if (e.pointerType === 'touch') { e.preventDefault(); return; }
+    // Finger: slide swipes only (pen/mouse draw). Tracked globally; see onFingerSwipePointerUp.
+    if (e.pointerType === 'touch') {
+        e.preventDefault();
+        state._fingerSwipe = { x0: e.clientX, y0: e.clientY, t0: performance.now(), pid: e.pointerId };
+        try { canvas.setPointerCapture(e.pointerId); } catch (_e) {}
+        return;
+    }
 
     e.preventDefault();
     if (state.isTyping) finalizeText();
@@ -5679,7 +5695,9 @@ function setupEventListeners() {
     });
 
     window.addEventListener('keydown', handleKeyDown);
-    setupSwipeNavGestures();
+    window.addEventListener('pointermove', onFingerSwipePointerMove, { capture: true, passive: false });
+    window.addEventListener('pointerup', onFingerSwipePointerUp, true);
+    window.addEventListener('pointercancel', onFingerSwipePointerCancel, true);
 }
 
 function handleKeyDown(e) {
