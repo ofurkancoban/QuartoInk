@@ -1315,6 +1315,24 @@ h1, h2, h3 {
     border-radius: 2px;
 }
 
+/* iPad / touch: horizontal swipe on slide edges when in Navigation mode (canvas passes touches through) */
+.swipe-nav-zone {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: min(36%, 180px);
+    z-index: 8;
+    pointer-events: none;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+.swipe-nav-zone-prev { left: 0; }
+.swipe-nav-zone-next { right: 0; }
+#editor-stage[data-swipe-nav="on"] .swipe-nav-zone {
+    pointer-events: auto;
+}
+
 #content-frame {
     width: 100%;
     height: 100%;
@@ -2733,8 +2751,10 @@ body[data-tool="highlighter"] #brush-preview {
 
                 <!-- EDITOR WORKSPACE -->
                 <div id="editor-area">
-                    <div id="editor-stage" class="editor-stage">
+                    <div id="editor-stage" class="editor-stage" data-swipe-nav="off">
                     <iframe id="content-frame" title="Presentation Viewer"></iframe>
+                    <div id="swipe-zone-prev" class="swipe-nav-zone swipe-nav-zone-prev" aria-hidden="true"></div>
+                    <div id="swipe-zone-next" class="swipe-nav-zone swipe-nav-zone-next" aria-hidden="true"></div>
                     <canvas id="canvas-overlay"></canvas>
                     <div id="eraser-cursor"></div>
                     <div id="brush-preview"></div>
@@ -2864,6 +2884,8 @@ function syncModeUI() {
     const navBtn = _$('#btn-nav-mode');
     if (navBtn) navBtn.classList.toggle('active', !state.isDrawingMode);
     if (canvas) canvas.style.pointerEvents = state.isDrawingMode ? 'auto' : 'none';
+    const stage = state.ui.editorStage || _$('#editor-stage');
+    if (stage) stage.setAttribute('data-swipe-nav', state.isDrawingMode ? 'off' : 'on');
 }
 
 const APP_ANNOTATION_PREFIX = 'quarto_anns_';
@@ -4223,6 +4245,47 @@ function fallbackNavigateSlide(dir) {
         window.log('Fallback navigation failed: ' + err.message, 'warn');
         return false;
     }
+}
+
+function setupSwipeNavGestures() {
+    const minDX = 56;
+    const maxDuration = 700;
+    const minHorizRatio = 1.2; /* |dx| must exceed |dy| * this */
+
+    function bindZone(zone) {
+        if (!zone) return;
+        zone.addEventListener('touchstart', (e) => {
+            if (state.isDrawingMode || e.touches.length !== 1) return;
+            const t = e.touches[0];
+            zone._inkSwipe = { x0: t.clientX, y0: t.clientY, t0: performance.now() };
+        }, { passive: true });
+        zone.addEventListener('touchmove', (e) => {
+            if (zone._inkSwipe && e.touches.length === 1 && !state.isDrawingMode) {
+                const t = e.touches[0];
+                const dx = t.clientX - zone._inkSwipe.x0;
+                const dy = t.clientY - zone._inkSwipe.y0;
+                if (Math.abs(dx) > 24 && Math.abs(dx) > Math.abs(dy) * minHorizRatio) e.preventDefault();
+            }
+        }, { passive: false });
+        zone.addEventListener('touchend', (e) => {
+            const s = zone._inkSwipe;
+            zone._inkSwipe = null;
+            if (!s || state.isDrawingMode) return;
+            if (e.changedTouches.length !== 1) return;
+            const t = e.changedTouches[0];
+            const dt = performance.now() - s.t0;
+            if (dt > maxDuration) return;
+            const dx = t.clientX - s.x0;
+            const dy = t.clientY - s.y0;
+            if (Math.abs(dx) < minDX) return;
+            if (Math.abs(dx) < Math.abs(dy) * minHorizRatio) return;
+            if (dx < 0) navigateSlide('Next');
+            else navigateSlide('Prev');
+        }, { passive: true });
+    }
+
+    bindZone(_$('#swipe-zone-prev'));
+    bindZone(_$('#swipe-zone-next'));
 }
 
 function navigateSlide(dir) {
@@ -5620,6 +5683,7 @@ function setupEventListeners() {
     });
 
     window.addEventListener('keydown', handleKeyDown);
+    setupSwipeNavGestures();
 }
 
 function handleKeyDown(e) {
