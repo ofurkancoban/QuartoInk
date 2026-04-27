@@ -3012,6 +3012,8 @@ const state = {
     history: [],
     redoStack: [],
     isDragging: false,
+    /** True if the current stroke began with a mouse (strict pointerId). Pen/touch: loose matching. */
+    strokeFromMouse: false,
     activePointerId: undefined,
     startX: 0, startY: 0,
     currentPath: [],
@@ -4400,6 +4402,7 @@ function resetDrawingGestureState() {
     state.shapeSnapTimer = null;
     const pid = state.activePointerId;
     state.isDragging = false;
+    state.strokeFromMouse = false;
     state.activePointerId = undefined;
     state.freehandSnapped = false;
     state.shapeSnapped = false;
@@ -4504,31 +4507,23 @@ function applyActiveTool(t, b, fromPointer) {
 
 function startDrawing(e) {
     if (!state.isDrawingMode) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
 
-    // Inconsistent leftover flag (missed pointerup)
     if (state.isDragging && state.activePointerId === undefined) {
         state.isDragging = false;
         state.currentPath = [];
     }
 
-    // New pointer while another session was left active (e.g. missed pointerup) — recover instead of blocking
-    if (state.isDragging && state.activePointerId !== undefined && state.activePointerId !== e.pointerId) {
-        resetDrawingGestureState();
+    if (state.isDragging) {
+        const same = state.activePointerId === e.pointerId;
+        if (same) {
+            resetDrawingGestureState();
+        } else if (state.strokeFromMouse && e.pointerType === 'mouse') {
+            return;
+        } else {
+            resetDrawingGestureState();
+        }
     }
-
-    // Missed pointerup (common on tablets) leaves isDragging+same id; new pointerdown would stack — reset first
-    if (state.isDragging && state.activePointerId === e.pointerId) {
-        resetDrawingGestureState();
-    }
-
-    // Prevent multi-touch interference: only track one pointer at a time
-    if (state.isDragging && state.activePointerId !== undefined && state.activePointerId !== e.pointerId) return;
-
-    // Do not turn canvas pointerdown into Quarto tab clicks while drawing: tab strips lie under this overlay.
-    // Switch tabs in Navigation mode (canvas lets events through to the iframe).
-    //
-    // No "finger vs Pencil" swipe heuristic on canvas: iPadOS often reports Pencil as pointerType "touch", so
-    // that path left isDragging false and the stroke never started. Use slide nav buttons or Nav mode to swipe.
 
     e.preventDefault();
     if (state.isTyping) finalizeText();
@@ -4551,6 +4546,7 @@ function startDrawing(e) {
     }
     
     state.isDragging = true;
+    state.strokeFromMouse = e.pointerType === 'mouse';
     state.activePointerId = e.pointerId;
     try { canvas.setPointerCapture(e.pointerId); } catch(_e) {}
     state.startX = p.x; state.startY = p.y; 
@@ -4567,8 +4563,10 @@ function startDrawing(e) {
         state.snapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
     } catch (err) {
         state.isDragging = false;
+        state.strokeFromMouse = false;
         state.activePointerId = undefined;
         state.currentPath = [];
+        try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
         return;
     }
     // Do not paint a single-point disk here: it stays visible for pen/eraser (no full-canvas
@@ -4589,7 +4587,14 @@ function startDrawing(e) {
     }
     
     if (state.tool === 'lasso') {
-        if (isPointInDeleteHandle(p)) { deleteSelectedAnnotations(); state.isDragging = false; return; }
+        if (isPointInDeleteHandle(p)) {
+            deleteSelectedAnnotations();
+            state.isDragging = false;
+            state.strokeFromMouse = false;
+            state.activePointerId = undefined;
+            try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
+            return;
+        }
         if (isPointInResizeHandle(p)) { state.isResizingSelection = true; state.resizeOrigin = { x: getSelectionBoundingBox().minX, y: getSelectionBoundingBox().minY }; }
         else if (isPointInLassoSelection(p)) { state.isMovingSelection = true; }
         else { state.selectedAnnotations = []; state.lassoPath = [p]; }
@@ -4597,12 +4602,12 @@ function startDrawing(e) {
 }
 
 function draw(e) {
-    if (e.pointerType === 'touch' && !state.isDragging) {
-        e.preventDefault();
+    if (!state.isDrawingMode) return;
+    if (!state.isDragging) {
+        if (e.pointerType === 'touch') e.preventDefault();
         return;
     }
-    // Ignore events from other pointers during active drawing
-    if (state.isDragging && state.activePointerId !== undefined && state.activePointerId !== e.pointerId) return;
+    if (state.strokeFromMouse && state.activePointerId !== undefined && e.pointerId !== state.activePointerId) return;
     e.preventDefault();
 
     const p = getPos(e);
@@ -4795,10 +4800,15 @@ function draw(e) {
 
 function stopDrawing(e) {
     if (!state.isDragging) return;
-    if (state.activePointerId !== undefined && e.pointerId !== state.activePointerId) return;
+    if (state.strokeFromMouse && state.activePointerId !== undefined && e.pointerId !== state.activePointerId) return;
+    const captureId = state.activePointerId;
     state.isDragging = false;
+    state.strokeFromMouse = false;
     state.activePointerId = undefined;
-    try { canvas.releasePointerCapture(e.pointerId); } catch(_e) {}
+    if (canvas) {
+        if (captureId !== undefined) try { canvas.releasePointerCapture(captureId); } catch (_e) {}
+        try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
+    }
     const p = getPos(e);
     clearTimeout(state.shapeSnapTimer);
     clearTimeout(state.freehandSnapTimer);
@@ -5671,20 +5681,25 @@ function setupEventListeners() {
         }
     });
 
-    canvas.addEventListener('pointerdown', startDrawing, { passive: false });
+    canvas.addEventListener('pointerdown', startDrawing, { passive: false, capture: true });
     canvas.addEventListener('pointermove', draw, { passive: false });
     window.addEventListener('pointerup', stopDrawing, { capture: true });
     canvas.addEventListener('pointercancel', (e) => {
-        if (state.isDragging) {
-            state.isDragging = false;
-            state.activePointerId = undefined;
-            state.currentPath = [];
-            state.lastStaticP = null;
-            clearTimeout(state.freehandSnapTimer);
-            clearTimeout(state.shapeSnapTimer);
-            redraw();
-            restoreBrushPreviewAfterStroke();
+        if (!state.isDragging) return;
+        const cap = state.activePointerId;
+        state.isDragging = false;
+        state.strokeFromMouse = false;
+        state.activePointerId = undefined;
+        state.currentPath = [];
+        state.lastStaticP = null;
+        clearTimeout(state.freehandSnapTimer);
+        clearTimeout(state.shapeSnapTimer);
+        if (canvas) {
+            if (cap !== undefined) try { canvas.releasePointerCapture(cap); } catch (_e) {}
+            try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
         }
+        redraw();
+        restoreBrushPreviewAfterStroke();
     });
     // Do NOT clear active stroke state in lostpointercapture: a stale event can run after
     // programmatic releasePointerCapture (tool/colour change) and wipe the *next* stroke
