@@ -4548,7 +4548,10 @@ function startDrawing(e) {
     state.isDragging = true;
     state.strokeFromMouse = e.pointerType === 'mouse';
     state.activePointerId = e.pointerId;
-    try { canvas.setPointerCapture(e.pointerId); } catch(_e) {}
+    // iPadOS: setPointerCapture + canvas-only pointermove often drops Pencil moves; capture only for mouse.
+    if (state.strokeFromMouse) {
+        try { canvas.setPointerCapture(e.pointerId); } catch (_e) {}
+    }
     state.startX = p.x; state.startY = p.y; 
     const normP = toNormalized(p.x, p.y);
     state.currentPath = [normP];
@@ -4562,11 +4565,12 @@ function startDrawing(e) {
     try {
         state.snapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
     } catch (err) {
+        const wasMouse = state.strokeFromMouse;
         state.isDragging = false;
         state.strokeFromMouse = false;
         state.activePointerId = undefined;
         state.currentPath = [];
-        try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
+        if (wasMouse) try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
         return;
     }
     // Do not paint a single-point disk here: it stays visible for pen/eraser (no full-canvas
@@ -4592,7 +4596,7 @@ function startDrawing(e) {
             state.isDragging = false;
             state.strokeFromMouse = false;
             state.activePointerId = undefined;
-            try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
+            if (state.strokeFromMouse) try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
             return;
         }
         if (isPointInResizeHandle(p)) { state.isResizingSelection = true; state.resizeOrigin = { x: getSelectionBoundingBox().minX, y: getSelectionBoundingBox().minY }; }
@@ -4602,11 +4606,7 @@ function startDrawing(e) {
 }
 
 function draw(e) {
-    if (!state.isDrawingMode) return;
-    if (!state.isDragging) {
-        if (e.pointerType === 'touch') e.preventDefault();
-        return;
-    }
+    if (!state.isDrawingMode || !state.isDragging) return;
     if (state.strokeFromMouse && state.activePointerId !== undefined && e.pointerId !== state.activePointerId) return;
     e.preventDefault();
 
@@ -4802,10 +4802,11 @@ function stopDrawing(e) {
     if (!state.isDragging) return;
     if (state.strokeFromMouse && state.activePointerId !== undefined && e.pointerId !== state.activePointerId) return;
     const captureId = state.activePointerId;
+    const wasMouseStroke = state.strokeFromMouse;
     state.isDragging = false;
     state.strokeFromMouse = false;
     state.activePointerId = undefined;
-    if (canvas) {
+    if (canvas && wasMouseStroke) {
         if (captureId !== undefined) try { canvas.releasePointerCapture(captureId); } catch (_e) {}
         try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
     }
@@ -5682,11 +5683,17 @@ function setupEventListeners() {
     });
 
     canvas.addEventListener('pointerdown', startDrawing, { passive: false, capture: true });
-    canvas.addEventListener('pointermove', draw, { passive: false });
+    /** Pencil/touch moves often miss the canvas node; listen on window in capture phase (must not preventDefault unless isDragging — see draw). */
+    function routeDrawingPointerMove(ev) {
+        if (!state.isDrawingMode || !state.isDragging) return;
+        draw(ev);
+    }
+    window.addEventListener('pointermove', routeDrawingPointerMove, { capture: true, passive: false });
     window.addEventListener('pointerup', stopDrawing, { capture: true });
-    canvas.addEventListener('pointercancel', (e) => {
+    function routeDrawingPointerCancel(ev) {
         if (!state.isDragging) return;
         const cap = state.activePointerId;
+        const wasMouse = state.strokeFromMouse;
         state.isDragging = false;
         state.strokeFromMouse = false;
         state.activePointerId = undefined;
@@ -5694,13 +5701,14 @@ function setupEventListeners() {
         state.lastStaticP = null;
         clearTimeout(state.freehandSnapTimer);
         clearTimeout(state.shapeSnapTimer);
-        if (canvas) {
+        if (canvas && wasMouse) {
             if (cap !== undefined) try { canvas.releasePointerCapture(cap); } catch (_e) {}
-            try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
+            try { canvas.releasePointerCapture(ev.pointerId); } catch (_e) {}
         }
         redraw();
         restoreBrushPreviewAfterStroke();
-    });
+    }
+    window.addEventListener('pointercancel', routeDrawingPointerCancel, { capture: true });
     // Do NOT clear active stroke state in lostpointercapture: a stale event can run after
     // programmatic releasePointerCapture (tool/colour change) and wipe the *next* stroke
     // that just called setPointerCapture (same pointer id). Teardown is handled by pointerup / pointercancel.
