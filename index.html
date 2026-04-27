@@ -3033,7 +3033,66 @@ const state = {
     freehandSnapTimer: null,
     freehandSnapped: false,
     snapStartPoint: null,
+    /** iOS: stroke driven by TouchEvent shim; ignore companion PointerEvent stream */
+    strokeFromDirectTouch: false
 };
+
+/** True for iPad/iPhone (and iPad-as-Mac UA); ink uses TouchEvent path, not PointerEvent pen/touch. */
+const GN_IS_TOUCH_HOST = typeof window !== 'undefined' && 'ontouchstart' in window && (
+    /iPad|iPhone|iPod|Android/i.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+);
+
+function gnSynthPointerFromTouch(touch) {
+    return {
+        clientX: touch.clientX,
+        clientY: touch.clientY,
+        pointerId: 3800000 + touch.identifier,
+        pointerType: 'touch',
+        button: 0,
+        _gnFromTouchShim: true,
+        preventDefault: function () {},
+        stopPropagation: function () {}
+    };
+}
+
+var gnInkActiveTouchId = null;
+
+function gnInkTouchStart(ev) {
+    if (!GN_IS_TOUCH_HOST || !state.isDrawingMode) return;
+    if (ev.touches.length !== 1) return;
+    ev.preventDefault();
+    gnInkActiveTouchId = ev.touches[0].identifier;
+    startDrawing(gnSynthPointerFromTouch(ev.touches[0]));
+}
+
+function gnInkTouchMove(ev) {
+    if (!GN_IS_TOUCH_HOST || gnInkActiveTouchId === null) return;
+    if (!state.isDragging) {
+        gnInkActiveTouchId = null;
+        return;
+    }
+    const t = Array.prototype.find.call(ev.touches, function (x) { return x.identifier === gnInkActiveTouchId; });
+    if (!t) return;
+    ev.preventDefault();
+    draw(gnSynthPointerFromTouch(t));
+}
+
+function gnInkTouchEnd(ev) {
+    if (!GN_IS_TOUCH_HOST || gnInkActiveTouchId === null) return;
+    const t = Array.prototype.find.call(ev.changedTouches, function (x) { return x.identifier === gnInkActiveTouchId; });
+    if (!t) return;
+    gnInkActiveTouchId = null;
+    ev.preventDefault();
+    stopDrawing(gnSynthPointerFromTouch(t));
+}
+
+function gnInkTouchCancel(ev) {
+    if (!GN_IS_TOUCH_HOST || gnInkActiveTouchId === null) return;
+    if (!Array.prototype.some.call(ev.changedTouches, function (x) { return x.identifier === gnInkActiveTouchId; })) return;
+    gnInkActiveTouchId = null;
+    if (state.isDragging) resetDrawingGestureState();
+}
 
 // --- COORDINATE NORMALIZATION ---
 function toNormalized(px, py) {
@@ -4412,6 +4471,8 @@ function resetDrawingGestureState() {
     state.currentPath = [];
     state.lassoPath = [];
     state.lastStaticP = null;
+    state.strokeFromDirectTouch = false;
+    gnInkActiveTouchId = null;
     if (canvas && pid !== undefined) {
         try { canvas.releasePointerCapture(pid); } catch (_e) {}
     }
@@ -4508,6 +4569,7 @@ function applyActiveTool(t, b, fromPointer) {
 function startDrawing(e) {
     if (!state.isDrawingMode) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (GN_IS_TOUCH_HOST && e.pointerType !== 'mouse' && !e._gnFromTouchShim) return;
 
     if (state.isDragging && state.activePointerId === undefined) {
         state.isDragging = false;
@@ -4542,11 +4604,13 @@ function startDrawing(e) {
         } else {
             spawnTextInput(p.x, p.y);
         }
+        gnInkActiveTouchId = null;
         return;
     }
     
     state.isDragging = true;
     state.strokeFromMouse = e.pointerType === 'mouse';
+    state.strokeFromDirectTouch = !!e._gnFromTouchShim;
     state.activePointerId = e.pointerId;
     // iPadOS: setPointerCapture + canvas-only pointermove often drops Pencil moves; capture only for mouse.
     if (state.strokeFromMouse) {
@@ -4568,8 +4632,10 @@ function startDrawing(e) {
         const wasMouse = state.strokeFromMouse;
         state.isDragging = false;
         state.strokeFromMouse = false;
+        state.strokeFromDirectTouch = false;
         state.activePointerId = undefined;
         state.currentPath = [];
+        gnInkActiveTouchId = null;
         if (wasMouse) try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
         return;
     }
@@ -4593,10 +4659,13 @@ function startDrawing(e) {
     if (state.tool === 'lasso') {
         if (isPointInDeleteHandle(p)) {
             deleteSelectedAnnotations();
+            const wasM = state.strokeFromMouse;
             state.isDragging = false;
             state.strokeFromMouse = false;
+            state.strokeFromDirectTouch = false;
             state.activePointerId = undefined;
-            if (state.strokeFromMouse) try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
+            gnInkActiveTouchId = null;
+            if (wasM) try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
             return;
         }
         if (isPointInResizeHandle(p)) { state.isResizingSelection = true; state.resizeOrigin = { x: getSelectionBoundingBox().minX, y: getSelectionBoundingBox().minY }; }
@@ -4607,6 +4676,7 @@ function startDrawing(e) {
 
 function draw(e) {
     if (!state.isDrawingMode || !state.isDragging) return;
+    if (state.strokeFromDirectTouch && !e._gnFromTouchShim && e.pointerType !== 'mouse') return;
     if (state.strokeFromMouse && state.activePointerId !== undefined && e.pointerId !== state.activePointerId) return;
     e.preventDefault();
 
@@ -4800,12 +4870,15 @@ function draw(e) {
 
 function stopDrawing(e) {
     if (!state.isDragging) return;
+    if (state.strokeFromDirectTouch && !e._gnFromTouchShim) return;
     if (state.strokeFromMouse && state.activePointerId !== undefined && e.pointerId !== state.activePointerId) return;
     const captureId = state.activePointerId;
     const wasMouseStroke = state.strokeFromMouse;
     state.isDragging = false;
     state.strokeFromMouse = false;
+    state.strokeFromDirectTouch = false;
     state.activePointerId = undefined;
+    gnInkActiveTouchId = null;
     if (canvas && wasMouseStroke) {
         if (captureId !== undefined) try { canvas.releasePointerCapture(captureId); } catch (_e) {}
         try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
@@ -5683,6 +5756,12 @@ function setupEventListeners() {
     });
 
     canvas.addEventListener('pointerdown', startDrawing, { passive: false, capture: true });
+    if (GN_IS_TOUCH_HOST) {
+        canvas.addEventListener('touchstart', gnInkTouchStart, { passive: false, capture: true });
+        canvas.addEventListener('touchmove', gnInkTouchMove, { passive: false, capture: true });
+        canvas.addEventListener('touchend', gnInkTouchEnd, { passive: false, capture: true });
+        canvas.addEventListener('touchcancel', gnInkTouchCancel, { passive: false, capture: true });
+    }
     /** Pencil/touch moves often miss the canvas node; listen on window in capture phase (must not preventDefault unless isDragging — see draw). */
     function routeDrawingPointerMove(ev) {
         if (!state.isDrawingMode || !state.isDragging) return;
@@ -5696,6 +5775,8 @@ function setupEventListeners() {
         const wasMouse = state.strokeFromMouse;
         state.isDragging = false;
         state.strokeFromMouse = false;
+        state.strokeFromDirectTouch = false;
+        gnInkActiveTouchId = null;
         state.activePointerId = undefined;
         state.currentPath = [];
         state.lastStaticP = null;
