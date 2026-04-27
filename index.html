@@ -3046,54 +3046,6 @@ function fromNormalized(nx, ny) {
     return { x: nx * m.width + m.x, y: ny * m.height + m.y };
 }
 
-function resolveIframeTabTarget(el) {
-    if (!el || el.nodeType !== 1) return null;
-    if (el.matches && el.matches('[role="tab"]')) return el;
-    if (el.matches && el.matches('a[data-bs-toggle="tab"]')) return el;
-    const liTabby = el.closest && el.closest('ul.panel-tabset-tabby > li');
-    if (liTabby) {
-        const a = liTabby.querySelector(':scope > a[href], :scope > [role="tab"]');
-        if (a) return a;
-    }
-    const liNav = el.closest && el.closest('.nav-tabs > li, [role="tablist"] > li');
-    if (liNav) {
-        const a = liNav.querySelector(':scope > a[href], :scope > [role="tab"]');
-        if (a) return a;
-    }
-    if (el.closest) {
-        const t = el.closest(
-            'ul.panel-tabset-tabby > li > a[href], [role="tablist"] a[href], .nav-tabs > li > a[href]'
-        );
-        if (t) return t;
-    }
-    return null;
-}
-
-function tryPassClickToIframeTab(e) {
-    const f = state.ui.frame || _$('#content-frame');
-    if (!f || !f.contentWindow) return false;
-    try {
-        const doc = f.contentWindow.document;
-        const fr = f.getBoundingClientRect();
-        const ix = Math.round(e.clientX - fr.left);
-        const iy = Math.round(e.clientY - fr.top);
-        if (ix < 0 || iy < 0 || ix > fr.width || iy > fr.height) return false;
-        const stack =
-            typeof doc.elementsFromPoint === 'function'
-                ? doc.elementsFromPoint(ix, iy)
-                : [doc.elementFromPoint(ix, iy)].filter(Boolean);
-        for (let i = 0; i < stack.length; i++) {
-            const tab = resolveIframeTabTarget(stack[i]);
-            if (tab) {
-                e.preventDefault();
-                tab.click();
-                return true;
-            }
-        }
-    } catch (_err) {}
-    return false;
-}
-
 function addFreehandSegmentsFromPointer(e, p) {
     const minD = 0.35;
     const maxSeg = 7;
@@ -4640,27 +4592,9 @@ function startDrawing(e) {
     // Prevent multi-touch interference: only track one pointer at a time
     if (state.isDragging && state.activePointerId !== undefined && state.activePointerId !== e.pointerId) return;
 
-    if (tryPassClickToIframeTab(e)) return;
-
-    if (state.tabRects && state.tabRects.length > 0) {
-        const x = e.clientX;
-        const y = e.clientY;
-        const hitTab = state.tabRects.find(r => {
-            const L = r.left != null ? r.left : r.x;
-            const T = r.top != null ? r.top : r.y;
-            const W = r.width != null ? r.width : r.w;
-            const H = r.height != null ? r.height : r.h;
-            if (L == null || T == null || W == null || H == null) return false;
-            return x >= L && x <= L + W && y >= T && y <= T + H;
-        });
-        if (hitTab) {
-            const f = state.ui.frame || _$('#content-frame');
-            if (f && f.contentWindow) {
-                f.contentWindow.postMessage({ type: 'CLICK_TAB', id: hitTab.id || '', href: hitTab.href || '' }, '*');
-            }
-            return;
-        }
-    }
+    // Do not turn canvas pointerdown into Quarto tab clicks while drawing: tab strips lie under this overlay.
+    // That path swallowed strokes (often the first line after chrome interaction when still aiming near the tab row).
+    // Switch tabs in Navigation mode (canvas lets events through to the iframe).
 
     // Finger (fat touch): slide swipes. Pencil often arrives as pointerType "touch" — must not take this path.
     const skipFingerNavHeuristic = performance.now() < state.suppressTouchNavUntil;
