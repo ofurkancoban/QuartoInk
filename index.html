@@ -3060,12 +3060,14 @@ var gnInkActiveTouchId = null;
 function gnInkTouchStart(ev) {
     if (!GN_TOUCH_INK_BRIDGE || !state.isDrawingMode) return;
     if (ev.touches.length !== 1) return;
-    // Apple Pencil / active stylus: ink from pointerdown (pointerType "pen"); skip shim to avoid reset/double stroke.
     const t0 = ev.touches[0];
+    // Stylus: WebKit reports touchType "stylus"; ink must stay on PointerEvent (pen), never consume with shim.
     if (t0 && t0.touchType === 'stylus') return;
-    ev.preventDefault();
-    gnInkActiveTouchId = ev.touches[0].identifier;
-    startDrawing(gnSynthPointerFromTouch(ev.touches[0]));
+    // Pencil often fires pointerdown before touch; if a non-touch-shim stroke is already active, do not add shim / steal gesture.
+    if (state.isDragging && !state.strokeFromDirectTouch) return;
+    // Do NOT preventDefault on TouchEvents: iPadOS needs default handling for PointerEvent synthesis (see setupEventListeners).
+    gnInkActiveTouchId = t0.identifier;
+    startDrawing(gnSynthPointerFromTouch(t0));
 }
 
 function gnInkTouchMove(ev) {
@@ -3076,7 +3078,6 @@ function gnInkTouchMove(ev) {
     }
     const t = Array.prototype.find.call(ev.touches, function (x) { return x.identifier === gnInkActiveTouchId; });
     if (!t) return;
-    ev.preventDefault();
     draw(gnSynthPointerFromTouch(t));
 }
 
@@ -3085,7 +3086,6 @@ function gnInkTouchEnd(ev) {
     const t = Array.prototype.find.call(ev.changedTouches, function (x) { return x.identifier === gnInkActiveTouchId; });
     if (!t) return;
     gnInkActiveTouchId = null;
-    ev.preventDefault();
     stopDrawing(gnSynthPointerFromTouch(t));
 }
 
@@ -5768,10 +5768,11 @@ function setupEventListeners() {
 
     canvas.addEventListener('pointerdown', startDrawing, { passive: false, capture: true });
     if (GN_TOUCH_INK_BRIDGE) {
-        canvas.addEventListener('touchstart', gnInkTouchStart, { passive: false, capture: true });
-        canvas.addEventListener('touchmove', gnInkTouchMove, { passive: false, capture: true });
-        canvas.addEventListener('touchend', gnInkTouchEnd, { passive: false, capture: true });
-        canvas.addEventListener('touchcancel', gnInkTouchCancel, { passive: false, capture: true });
+        const gnTouchOpts = { passive: true, capture: true };
+        canvas.addEventListener('touchstart', gnInkTouchStart, gnTouchOpts);
+        canvas.addEventListener('touchmove', gnInkTouchMove, gnTouchOpts);
+        canvas.addEventListener('touchend', gnInkTouchEnd, gnTouchOpts);
+        canvas.addEventListener('touchcancel', gnInkTouchCancel, gnTouchOpts);
     }
     /** Pencil/touch moves often miss the canvas node; listen on window in capture phase (must not preventDefault unless isDragging — see draw). */
     function routeDrawingPointerMove(ev) {
