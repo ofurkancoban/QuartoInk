@@ -3033,11 +3033,11 @@ const state = {
     freehandSnapTimer: null,
     freehandSnapped: false,
     snapStartPoint: null,
-    /** iOS: stroke driven by TouchEvent shim; ignore companion PointerEvent stream */
+    /** Finger on touch hosts: stroke driven by TouchEvent shim (duplicate pointerType touch ignored). */
     strokeFromDirectTouch: false
 };
 
-/** Any touch-capable device: primary ink via TouchEvent shim (Pointer pen/touch ignored to avoid ghost/double input). */
+/** Touch-capable: finger ink via TouchEvent shim; ignore duplicate pointerType "touch" only — stylus uses Pointer (pen). */
 const GN_TOUCH_INK_BRIDGE = typeof window !== 'undefined' &&
     'ontouchstart' in window &&
     navigator.maxTouchPoints > 0;
@@ -3060,6 +3060,9 @@ var gnInkActiveTouchId = null;
 function gnInkTouchStart(ev) {
     if (!GN_TOUCH_INK_BRIDGE || !state.isDrawingMode) return;
     if (ev.touches.length !== 1) return;
+    // Apple Pencil / active stylus: ink from pointerdown (pointerType "pen"); skip shim to avoid reset/double stroke.
+    const t0 = ev.touches[0];
+    if (t0 && t0.touchType === 'stylus') return;
     ev.preventDefault();
     gnInkActiveTouchId = ev.touches[0].identifier;
     startDrawing(gnSynthPointerFromTouch(ev.touches[0]));
@@ -4577,7 +4580,7 @@ function applyActiveTool(t, b, fromPointer) {
 function startDrawing(e) {
     if (!state.isDrawingMode) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
-    if (GN_TOUCH_INK_BRIDGE && e.pointerType !== 'mouse' && !e._gnFromTouchShim) return;
+    if (GN_TOUCH_INK_BRIDGE && e.pointerType === 'touch' && !e._gnFromTouchShim) return;
 
     if (state.isDragging && state.activePointerId === undefined) {
         state.isDragging = false;
