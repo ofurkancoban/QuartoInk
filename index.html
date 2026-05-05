@@ -6323,7 +6323,6 @@ function onFingerSwipePointerUp(e) {
     if (!state._fingerSwipe || e.pointerId !== state._fingerSwipe.pid) return;
     const s = state._fingerSwipe;
     state._fingerSwipe = null;
-    syncModeUI();
     try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
     const dt = performance.now() - s.t0;
     tryNavigateFromSwipe(e.clientX - s.x0, e.clientY - s.y0, dt);
@@ -6332,7 +6331,6 @@ function onFingerSwipePointerUp(e) {
 function onFingerSwipePointerCancel(e) {
     if (!state._fingerSwipe || e.pointerId !== state._fingerSwipe.pid) return;
     state._fingerSwipe = null;
-    syncModeUI();
     try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
 }
 
@@ -6352,8 +6350,6 @@ function onFingerSwipePointerDownCapture(e) {
     if (excalidrawUsesInkCanvasInteractions()) return;
     if (!isFingerTouchPointer(e)) return;
     if (!isFingerSwipeGestureTarget(e.target)) return;
-    const host = _$('#excalidraw-host');
-    if (host) host.style.pointerEvents = 'none';
     e.preventDefault();
     e.stopPropagation();
     state._fingerSwipe = { x0: e.clientX, y0: e.clientY, t0: performance.now(), pid: e.pointerId };
@@ -6369,8 +6365,6 @@ function onFingerSwipeTouchStartCapture(e) {
     const t = e.touches[0];
     if (!t) return;
     if (isLikelyStylusTouchPoint(t)) return;
-    const host = _$('#excalidraw-host');
-    if (host) host.style.pointerEvents = 'none';
     e.preventDefault();
     e.stopPropagation();
     state._fingerSwipeTouch = { x0: t.clientX, y0: t.clientY, t0: performance.now() };
@@ -6393,7 +6387,6 @@ function onFingerSwipeTouchEndCapture(e) {
     if (!state._fingerSwipeTouch) return;
     const s = state._fingerSwipeTouch;
     state._fingerSwipeTouch = null;
-    syncModeUI();
     const t = e.changedTouches && e.changedTouches[0];
     if (!t) return;
     const dt = performance.now() - s.t0;
@@ -6402,7 +6395,6 @@ function onFingerSwipeTouchEndCapture(e) {
 
 function onFingerSwipeTouchCancelCapture() {
     state._fingerSwipeTouch = null;
-    syncModeUI();
 }
 
 function shouldRenderExcalEraserTailFromEventTarget(target) {
@@ -6571,9 +6563,12 @@ function isLikelyStylusPointer(e) {
     if (!e) return false;
     if (e.pointerType === 'pen') return true;
     if (e.pointerType !== 'touch') return false;
-    // iPad/Safari can expose many stylus-related fields on regular touch events.
-    // Only trust explicit stylus markers to avoid misclassifying finger input.
     if (typeof e.touchType === 'string' && e.touchType.toLowerCase() === 'stylus') return true;
+    if (typeof e.altitudeAngle === 'number' && e.altitudeAngle > 0) return true;
+    if (typeof e.azimuthAngle === 'number' && e.azimuthAngle > 0) return true;
+    if ((typeof e.tiltX === 'number' && e.tiltX !== 0) || (typeof e.tiltY === 'number' && e.tiltY !== 0)) return true;
+    if (typeof e.twist === 'number' && e.twist !== 0) return true;
+    if (typeof e.pressure === 'number' && e.pressure > 0 && e.pressure !== 0.5) return true;
     return false;
 }
 
