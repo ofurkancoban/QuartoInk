@@ -6305,7 +6305,7 @@ function tryNavigateFromSwipe(dx, dy, dt) {
 }
 
 function onFingerSwipePointerMove(e) {
-    if (!state._fingerSwipe || e.pointerId !== state._fingerSwipe.pid || e.pointerType !== 'touch') return;
+    if (!state._fingerSwipe || e.pointerId !== state._fingerSwipe.pid || !isFingerTouchPointer(e)) return;
     const s = state._fingerSwipe;
     const dx = e.clientX - s.x0;
     const dy = e.clientY - s.y0;
@@ -6491,6 +6491,25 @@ function getPos(e) {
     return { x: cx - r.left, y: cy - r.top, p: e.pressure || 0.5 };
 }
 
+function isLikelyStylusPointer(e) {
+    if (!e) return false;
+    if (e.pointerType === 'pen') return true;
+    if (e.pointerType !== 'touch') return false;
+    if (typeof e.touchType === 'string' && e.touchType.toLowerCase() === 'stylus') return true;
+    if (typeof e.altitudeAngle === 'number' || typeof e.azimuthAngle === 'number') return true;
+    if ((typeof e.tiltX === 'number' && e.tiltX !== 0) || (typeof e.tiltY === 'number' && e.tiltY !== 0)) return true;
+    if (typeof e.twist === 'number' && e.twist !== 0) return true;
+    if (typeof e.width === 'number' && typeof e.height === 'number') {
+        const contactPatch = Math.max(e.width || 0, e.height || 0);
+        if (contactPatch > 0 && contactPatch <= 6) return true;
+    }
+    return false;
+}
+
+function isFingerTouchPointer(e) {
+    return !!e && e.pointerType === 'touch' && !isLikelyStylusPointer(e);
+}
+
 function ensureEraserTailLayer() {
     if (eraserTailLayer && document.body.contains(eraserTailLayer)) return eraserTailLayer;
     const el = document.createElement('canvas');
@@ -6642,9 +6661,9 @@ function startDrawing(e) {
     // Prevent multi-touch interference: only track one pointer at a time
     if (state.isDragging && state.activePointerId !== undefined && state.activePointerId !== e.pointerId) return;
 
-    // Finger: slide swipes only (pen/mouse draw). Tracked globally; see onFingerSwipePointerUp.
-    // MUST run before engine check so Excalidraw mode doesn't break touch navigation.
-    if (e.pointerType === 'touch') {
+    // Real finger touches navigate slides; stylus input should still draw on iPad.
+    // This must run before the engine-specific drawing branch so swipe navigation survives.
+    if (isFingerTouchPointer(e)) {
         e.preventDefault();
         state._fingerSwipe = { x0: e.clientX, y0: e.clientY, t0: performance.now(), pid: e.pointerId };
         try { canvas.setPointerCapture(e.pointerId); } catch (_e) {}
@@ -6695,7 +6714,7 @@ function startDrawing(e) {
 }
 
 function draw(e) {
-    if (e.pointerType === 'touch') { e.preventDefault(); return; }
+    if (isFingerTouchPointer(e)) { e.preventDefault(); return; }
     // Ignore events from other pointers during active drawing
     if (state.isDragging && state.activePointerId !== undefined && state.activePointerId !== e.pointerId) return;
     e.preventDefault();
@@ -6704,7 +6723,7 @@ function draw(e) {
     if (state.annotationEngine === 'excalidraw') return;
     
     // Custom tool cursor - show for mouse always, for stylus only eraser indicator
-    const isPen = e.pointerType === 'pen';
+    const isPen = isLikelyStylusPointer(e);
     const isMouse = e.pointerType === 'mouse';
     const showFullCursor = state.isDrawingMode && isMouse;
     const showEraserOnStylus = state.isDrawingMode && isPen && state.tool === 'eraser';
