@@ -6495,14 +6495,9 @@ function isLikelyStylusPointer(e) {
     if (!e) return false;
     if (e.pointerType === 'pen') return true;
     if (e.pointerType !== 'touch') return false;
+    // iPad/Safari can expose many stylus-related fields on regular touch events.
+    // Only trust explicit stylus markers to avoid misclassifying finger input.
     if (typeof e.touchType === 'string' && e.touchType.toLowerCase() === 'stylus') return true;
-    if (typeof e.altitudeAngle === 'number' || typeof e.azimuthAngle === 'number') return true;
-    if ((typeof e.tiltX === 'number' && e.tiltX !== 0) || (typeof e.tiltY === 'number' && e.tiltY !== 0)) return true;
-    if (typeof e.twist === 'number' && e.twist !== 0) return true;
-    if (typeof e.width === 'number' && typeof e.height === 'number') {
-        const contactPatch = Math.max(e.width || 0, e.height || 0);
-        if (contactPatch > 0 && contactPatch <= 6) return true;
-    }
     return false;
 }
 
