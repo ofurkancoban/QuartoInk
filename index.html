@@ -4180,7 +4180,8 @@ const state = {
     excalidrawScenes: new Map(),
     /** Per deck slide (e.g. "0-0"): slide rect in #canvas-overlay space (see slideMetricsToOverlaySpace). */
     slideMetricsBySlide: new Map(),
-    _fingerSwipeTouch: null
+    _fingerSwipeTouch: null,
+    _lastPointerSwipeStartTs: 0
 };
 
 // --- COORDINATE NORMALIZATION ---
@@ -6352,6 +6353,8 @@ function onFingerSwipePointerDownCapture(e) {
     if (!isFingerSwipeGestureTarget(e.target)) return;
     e.preventDefault();
     e.stopPropagation();
+    state._lastPointerSwipeStartTs = performance.now();
+    state._fingerSwipeTouch = null;
     state._fingerSwipe = { x0: e.clientX, y0: e.clientY, t0: performance.now(), pid: e.pointerId };
 }
 
@@ -6361,6 +6364,8 @@ function onFingerSwipeTouchStartCapture(e) {
     if (state.annotationEngine !== 'excalidraw') return;
     if (excalidrawUsesInkCanvasInteractions()) return;
     if (!isFingerSwipeGestureTarget(e.target)) return;
+    if (state._fingerSwipe) return;
+    if (performance.now() - (state._lastPointerSwipeStartTs || 0) < 700) return;
     if (!e.touches || e.touches.length !== 1) return;
     const t = e.touches[0];
     if (!t) return;
@@ -6371,7 +6376,7 @@ function onFingerSwipeTouchStartCapture(e) {
 }
 
 function onFingerSwipeTouchMoveCapture(e) {
-    if (!state._fingerSwipeTouch) return;
+    if (!state._fingerSwipeTouch || state._fingerSwipe) return;
     if (!e.touches || e.touches.length !== 1) return;
     const t = e.touches[0];
     if (!t) return;
@@ -6384,7 +6389,7 @@ function onFingerSwipeTouchMoveCapture(e) {
 }
 
 function onFingerSwipeTouchEndCapture(e) {
-    if (!state._fingerSwipeTouch) return;
+    if (!state._fingerSwipeTouch || state._fingerSwipe) return;
     const s = state._fingerSwipeTouch;
     state._fingerSwipeTouch = null;
     const t = e.changedTouches && e.changedTouches[0];
@@ -8530,6 +8535,10 @@ function setupEventListeners() {
     window.addEventListener('pointerup', onFingerSwipePointerUp, true);
     window.addEventListener('pointercancel', onFingerSwipePointerCancel, true);
     window.addEventListener('pointerdown', onFingerSwipePointerDownCapture, { capture: true, passive: false });
+    window.addEventListener('touchstart', onFingerSwipeTouchStartCapture, { capture: true, passive: false });
+    window.addEventListener('touchmove', onFingerSwipeTouchMoveCapture, { capture: true, passive: false });
+    window.addEventListener('touchend', onFingerSwipeTouchEndCapture, { capture: true, passive: false });
+    window.addEventListener('touchcancel', onFingerSwipeTouchCancelCapture, { capture: true, passive: false });
     window.addEventListener('pointerdown', onExcalEraserTailPointerDown, true);
     window.addEventListener('pointermove', onExcalEraserTailPointerMove, true);
     window.addEventListener('pointerup', onExcalEraserTailPointerUpOrCancel, true);
