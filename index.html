@@ -6336,7 +6336,17 @@ function onFingerSwipePointerCancel(e) {
     try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
 }
 
+function isPresentationInteractionReady() {
+    if (!state.currentFileName) return false;
+    const frameEl = state.ui.frame || _$('#content-frame');
+    const dropZoneEl = state.ui.dropZone || _$('#drop-zone');
+    if (!frameEl) return false;
+    if (dropZoneEl && dropZoneEl.style.display !== 'none') return false;
+    return frameEl.style.display !== 'none';
+}
+
 function onFingerSwipePointerDownCapture(e) {
+    if (!isPresentationInteractionReady()) return;
     if (!state.isDrawingMode) return;
     if (state.annotationEngine !== 'excalidraw') return;
     if (excalidrawUsesInkCanvasInteractions()) return;
@@ -6349,6 +6359,7 @@ function onFingerSwipePointerDownCapture(e) {
 }
 
 function onFingerSwipeTouchStartCapture(e) {
+    if (!isPresentationInteractionReady()) return;
     if (!state.isDrawingMode) return;
     if (state.annotationEngine !== 'excalidraw') return;
     if (excalidrawUsesInkCanvasInteractions()) return;
