@@ -6569,6 +6569,10 @@ function isLikelyStylusPointer(e) {
     if ((typeof e.tiltX === 'number' && e.tiltX !== 0) || (typeof e.tiltY === 'number' && e.tiltY !== 0)) return true;
     if (typeof e.twist === 'number' && e.twist !== 0) return true;
     if (typeof e.pressure === 'number' && e.pressure > 0 && e.pressure !== 0.5) return true;
+    if (typeof e.width === 'number' && typeof e.height === 'number') {
+        const contactPatch = Math.max(e.width || 0, e.height || 0);
+        if (contactPatch > 0 && contactPatch <= 6) return true;
+    }
     return false;
 }
 
@@ -6591,14 +6595,7 @@ function isIPadLikeTouchDevice() {
 
 function isFingerTouchPointer(e) {
     if (!e || isLikelyStylusPointer(e)) return false;
-    if (e.pointerType === 'touch') return true;
-    if (
-        e.pointerType === 'mouse' &&
-        isTouchFirstDevice() &&
-        e.sourceCapabilities &&
-        e.sourceCapabilities.firesTouchEvents
-    ) return true;
-    return false;
+    return e.pointerType === 'touch';
 }
 
 function isLikelyStylusTouchPoint(touchPoint) {
@@ -8533,10 +8530,6 @@ function setupEventListeners() {
     window.addEventListener('pointerup', onFingerSwipePointerUp, true);
     window.addEventListener('pointercancel', onFingerSwipePointerCancel, true);
     window.addEventListener('pointerdown', onFingerSwipePointerDownCapture, { capture: true, passive: false });
-    window.addEventListener('touchstart', onFingerSwipeTouchStartCapture, { capture: true, passive: false });
-    window.addEventListener('touchmove', onFingerSwipeTouchMoveCapture, { capture: true, passive: false });
-    window.addEventListener('touchend', onFingerSwipeTouchEndCapture, { capture: true, passive: false });
-    window.addEventListener('touchcancel', onFingerSwipeTouchCancelCapture, { capture: true, passive: false });
     window.addEventListener('pointerdown', onExcalEraserTailPointerDown, true);
     window.addEventListener('pointermove', onExcalEraserTailPointerMove, true);
     window.addEventListener('pointerup', onExcalEraserTailPointerUpOrCancel, true);
