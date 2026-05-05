@@ -6288,8 +6288,8 @@ function fallbackNavigateSlide(dir) {
 }
 
 function tryNavigateFromSwipe(dx, dy, dt) {
-    const minD = 56;
-    const maxT = 700;
+    const minD = 40;
+    const maxT = 1200;
     const ratio = 1.15;
     if (dt > maxT) return;
     const ax = Math.abs(dx);
@@ -6501,8 +6501,20 @@ function isLikelyStylusPointer(e) {
     return false;
 }
 
+function isTouchFirstDevice() {
+    try {
+        return (navigator.maxTouchPoints || 0) > 0;
+    } catch (_e) {
+        return false;
+    }
+}
+
 function isFingerTouchPointer(e) {
-    return !!e && e.pointerType === 'touch' && !isLikelyStylusPointer(e);
+    if (!e || isLikelyStylusPointer(e)) return false;
+    if (e.pointerType === 'touch') return true;
+    // iPad Safari can occasionally emit non-touch pointerType for finger contact.
+    // On touch-first devices, anything that's not an explicit pen is treated as finger.
+    return isTouchFirstDevice() && e.pointerType !== 'mouse';
 }
 
 function ensureEraserTailLayer() {
