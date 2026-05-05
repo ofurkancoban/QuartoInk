@@ -4642,13 +4642,22 @@ function scheduleExcalidrawMetricsLayoutSync() {
 
 function flushExcalidrawSceneToStorageForCurrentKey() {
     if (state.annotationEngine !== 'excalidraw' || !window.QuartoInkExcalidraw) return;
+    const key = getCurrentAnnotationKey();
+    // Always capture directly — the bundle's flush() relies on internal
+    // closure variables that may be stale after rapid slide changes.
+    const cap = window.QuartoInkExcalidraw.captureSceneSerialized;
+    if (typeof cap === 'function') {
+        const serialized = cap();
+        if (serialized) {
+            state.excalidrawScenes.set(key, serialized);
+            console.log('[Flush] Saved Excalidraw scene for key:', key, 'scenes total:', state.excalidrawScenes.size);
+        } else {
+            console.log('[Flush] captureSceneSerialized returned null for key:', key);
+        }
+    }
+    // Also call flush for any internal bookkeeping the bundle may need
     if (typeof window.QuartoInkExcalidraw.flush === 'function') {
         window.QuartoInkExcalidraw.flush();
-    } else {
-        const cap = window.QuartoInkExcalidraw.captureSceneSerialized;
-        if (typeof cap !== 'function') return;
-        const serialized = cap();
-        if (serialized) state.excalidrawScenes.set(getCurrentAnnotationKey(), serialized);
     }
 }
 
@@ -4729,8 +4738,15 @@ function syncAnnotationEngineMount() {
     const slideKey = getCurrentAnnotationKey();
     const scene = state.excalidrawScenes.get(slideKey) || null;
     const m = state.slideMetrics || { x: 0, y: 0 };
+    // Force full remount when slide key changes — the bundle's in-place swap
+    // leaves the React component's slideKey closure stale, causing its debounced
+    // onChange (120ms) to overwrite the flushed scene with stale data.
+    if (state.lastMountedSlideKey && state.lastMountedSlideKey !== slideKey) {
+        console.log('[SlideChange] Slide key changed from', state.lastMountedSlideKey, 'to', slideKey, '- forcing unmount');
+        window.QuartoInkExcalidraw.unmount();
+    }
     state.lastMountedSlideKey = slideKey;
-    console.log('[SlideChange] Mounting Excalidraw for key:', slideKey, 'hasScene:', !!scene, 'engine:', state.annotationEngine, 'drawingMode:', state.isDrawingMode);
+    console.log('[SlideChange] Mounting Excalidraw for key:', slideKey, 'hasScene:', !!scene, 'sceneKeys:', Array.from(state.excalidrawScenes.keys()), 'engine:', state.annotationEngine, 'drawingMode:', state.isDrawingMode);
     window.QuartoInkExcalidraw.mount(host, {
         slideKey,
         sceneSerialized: scene,
@@ -4740,6 +4756,12 @@ function syncAnnotationEngineMount() {
         onSerializedChange: (serialized, saveKey) => {
             if (!serialized) return;
             const targetKey = saveKey || slideKey;
+            // Guard against stale debounced saves from a previously unmounted
+            // component whose slideKey closure doesn't match the current slide.
+            if (targetKey !== getCurrentAnnotationKey() && targetKey !== state.lastMountedSlideKey) {
+                console.log('[onSerializedChange] Dropping stale save for key:', targetKey, 'current:', getCurrentAnnotationKey());
+                return;
+            }
             state.excalidrawScenes.set(targetKey, serialized);
             saveToLocalStorage();
         },
