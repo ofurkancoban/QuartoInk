@@ -4181,7 +4181,8 @@ const state = {
     /** Per deck slide (e.g. "0-0"): slide rect in #canvas-overlay space (see slideMetricsToOverlaySpace). */
     slideMetricsBySlide: new Map(),
     _fingerSwipeTouch: null,
-    _lastPointerSwipeStartTs: 0
+    _lastPointerSwipeStartTs: 0,
+    _fingerGestureBlocksExcalCanvas: false
 };
 
 // --- COORDINATE NORMALIZATION ---
@@ -6324,6 +6325,7 @@ function onFingerSwipePointerUp(e) {
     if (!state._fingerSwipe || e.pointerId !== state._fingerSwipe.pid) return;
     const s = state._fingerSwipe;
     state._fingerSwipe = null;
+    setExcalidrawCanvasInputBlocked(false);
     try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
     const dt = performance.now() - s.t0;
     tryNavigateFromSwipe(e.clientX - s.x0, e.clientY - s.y0, dt);
@@ -6332,6 +6334,7 @@ function onFingerSwipePointerUp(e) {
 function onFingerSwipePointerCancel(e) {
     if (!state._fingerSwipe || e.pointerId !== state._fingerSwipe.pid) return;
     state._fingerSwipe = null;
+    setExcalidrawCanvasInputBlocked(false);
     try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
 }
 
@@ -6355,6 +6358,7 @@ function onFingerSwipePointerDownCapture(e) {
     e.stopPropagation();
     state._lastPointerSwipeStartTs = performance.now();
     state._fingerSwipeTouch = null;
+    setExcalidrawCanvasInputBlocked(true);
     state._fingerSwipe = { x0: e.clientX, y0: e.clientY, t0: performance.now(), pid: e.pointerId };
 }
 
@@ -6372,6 +6376,7 @@ function onFingerSwipeTouchStartCapture(e) {
     if (isLikelyStylusTouchPoint(t)) return;
     e.preventDefault();
     e.stopPropagation();
+    setExcalidrawCanvasInputBlocked(true);
     state._fingerSwipeTouch = { x0: t.clientX, y0: t.clientY, t0: performance.now() };
 }
 
@@ -6392,6 +6397,7 @@ function onFingerSwipeTouchEndCapture(e) {
     if (!state._fingerSwipeTouch || state._fingerSwipe) return;
     const s = state._fingerSwipeTouch;
     state._fingerSwipeTouch = null;
+    setExcalidrawCanvasInputBlocked(false);
     const t = e.changedTouches && e.changedTouches[0];
     if (!t) return;
     const dt = performance.now() - s.t0;
@@ -6400,6 +6406,7 @@ function onFingerSwipeTouchEndCapture(e) {
 
 function onFingerSwipeTouchCancelCapture() {
     state._fingerSwipeTouch = null;
+    setExcalidrawCanvasInputBlocked(false);
 }
 
 function shouldRenderExcalEraserTailFromEventTarget(target) {
@@ -6621,6 +6628,15 @@ function isFingerSwipeGestureTarget(target) {
         target.closest('button, a, input, textarea, select, [role="button"], [contenteditable="true"]')
     )) return false;
     return true;
+}
+
+function setExcalidrawCanvasInputBlocked(blocked) {
+    const host = _$('#excalidraw-host');
+    if (!host) return;
+    state._fingerGestureBlocksExcalCanvas = !!blocked;
+    host.querySelectorAll('.excalidraw canvas.excalidraw__canvas').forEach((cv) => {
+        cv.style.pointerEvents = blocked ? 'none' : '';
+    });
 }
 
 function ensureEraserTailLayer() {
