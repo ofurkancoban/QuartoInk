@@ -6333,6 +6333,16 @@ function onFingerSwipePointerCancel(e) {
     try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
 }
 
+function onFingerSwipePointerDownCapture(e) {
+    if (!state.isDrawingMode) return;
+    if (state.annotationEngine !== 'excalidraw') return;
+    if (excalidrawUsesInkCanvasInteractions()) return;
+    if (!isFingerTouchPointer(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    state._fingerSwipe = { x0: e.clientX, y0: e.clientY, t0: performance.now(), pid: e.pointerId };
+}
+
 function shouldRenderExcalEraserTailFromEventTarget(target) {
     if (!(state.annotationEngine === 'excalidraw' && state.isDrawingMode && state.tool === 'eraser')) return false;
     const host = _$('#excalidraw-host');
@@ -8433,6 +8443,7 @@ function setupEventListeners() {
     window.addEventListener('pointermove', onFingerSwipePointerMove, { capture: true, passive: false });
     window.addEventListener('pointerup', onFingerSwipePointerUp, true);
     window.addEventListener('pointercancel', onFingerSwipePointerCancel, true);
+    window.addEventListener('pointerdown', onFingerSwipePointerDownCapture, { capture: true, passive: false });
     window.addEventListener('pointerdown', onExcalEraserTailPointerDown, true);
     window.addEventListener('pointermove', onExcalEraserTailPointerMove, true);
     window.addEventListener('pointerup', onExcalEraserTailPointerUpOrCancel, true);
