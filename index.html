@@ -8120,6 +8120,21 @@ function setupEventListeners() {
         window.log('File picker: change detected');
         if(e.target.files[0]) { window.loadFile(e.target.files[0]); e.target.value = ''; } 
     };
+    const triggerFilePicker = (ev) => {
+        if (!fIn) return;
+        if (ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+        }
+        try { fIn.click(); } catch (_e) {}
+    };
+    const openTriggers = ['#btn-open-label', '#btn-browse-label'];
+    openTriggers.forEach((sel) => {
+        const el = _$(sel);
+        if (!el) return;
+        el.addEventListener('click', triggerFilePicker, { passive: false });
+        el.addEventListener('touchend', triggerFilePicker, { passive: false });
+    });
     
 
     // Drag and drop support
