@@ -4140,8 +4140,8 @@ const state = {
     strokeWidth: 1.5,
     thicknessIndex: 0,
     thicknessPresets: [1.5, 3, 10],
-    thicknessPresetsHighlighter: [12, 30, 48],
-    toolWidths: { pen: 1.5, highlighter: 30, eraser: ERASER_BASE_WIDTH_LOCKED, rect: 3, circle: 3, arrow: 3, line: 3 },
+    thicknessPresetsHighlighter: [4, 8, 16],
+    toolWidths: { pen: 1.5, highlighter: 8, eraser: ERASER_BASE_WIDTH_LOCKED, rect: 3, circle: 3, arrow: 3, line: 3 },
     opacity: 1,
     isFilled: false,
     lastBlobUrl: null,
@@ -4908,7 +4908,7 @@ function loadFromLocalStorage() {
                 if (Array.isArray(o.highlighter) && o.highlighter.length === 3) {
                     state.thicknessPresetsHighlighter = o.highlighter;
                 } else {
-                    state.thicknessPresetsHighlighter = [12, 30, 48];
+                    state.thicknessPresetsHighlighter = [4, 8, 16];
                 }
             } catch (_e) {}
         } else {
@@ -4942,6 +4942,16 @@ function loadFromLocalStorage() {
             const p = normalizeColorHex(state.toolColors.pen);
             if (LEGACY_DEFAULT_PEN_STROKES.has(p)) state.toolColors.pen = STROKE_BLACK;
             localStorage.setItem(penLegacyKey, '1');
+        }
+
+        /* ── One-time migration: replace old thick highlighter presets [12,30,48] with refined [4,8,16] ── */
+        const hlMigKey = 'gn_highlighter_thin_migrated_v1';
+        if (!localStorage.getItem(hlMigKey)) {
+            state.thicknessPresetsHighlighter = [4, 8, 16];
+            if (state.toolWidths.highlighter >= 12) {
+                state.toolWidths.highlighter = 8;
+            }
+            localStorage.setItem(hlMigKey, '1');
         }
 
         const lastIdx = localStorage.getItem('gn_last_thickness_index');
