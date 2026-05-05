@@ -1994,12 +1994,12 @@ h1, h2, h3 {
     display: none !important;
 }
 #app[data-annotation-engine="excalidraw"] #eraser-cursor {
-    display: none !important;
+    display: none;
 }
 #app[data-annotation-engine="excalidraw"][data-tool="eraser"] #eraser-cursor,
 #app[data-annotation-engine="excalidraw"][data-tool="pen"] #eraser-cursor,
 #app[data-annotation-engine="excalidraw"][data-tool="highlighter"] #eraser-cursor {
-    display: block !important;
+    display: block;
 }
 
 
@@ -3478,9 +3478,28 @@ function syncExcalidrawEraserCursor(clientX, clientY, pointerEvent) {
         state.isDrawingMode &&
         state.annotationEngine === 'excalidraw' &&
         (state.tool === 'eraser' || state.tool === 'pen' || state.tool === 'highlighter');
+
     if (!show) {
         c.style.display = 'none';
         return;
+    }
+
+    // Hide if over UI elements
+    const target = (pointerEvent && pointerEvent.target) || document.elementFromPoint(clientX, clientY);
+    if (target) {
+        // Check for our custom UI and Excalidraw/Reveal UI elements
+        const isUI = target.closest(
+            '#goodnotes-top-bar, #app-title-bar, #app-status-bar, #tab-proxy-layer, #sidebar, ' +
+            '.gn-popover, .modal-overlay, .ios-pwa-overlay, ' +
+            '.Island, .App-toolbar, .App-menu_top, .App-menu_bottom, .layer-ui__wrapper, .sidebar, .default-sidebar, ' +
+            '.HelpDialog, .Dialog, .dropdown-menu, .context-menu, .popover, .main-menu-trigger, .help-icon, .stats, .hint-toolbar, ' +
+            '.controls-arrow, .navigate-left, .navigate-right, .navigate-up, .navigate-down, .reveal .controls, .reveal .controls button, ' +
+            '.excalidraw-ui, .Stack, .ToolIcon, .buttonList, button, input, select, label'
+        );
+        if (isUI) {
+            c.style.display = 'none';
+            return;
+        }
     }
     
     const cursorSide = state.tool === 'eraser'
@@ -6967,7 +6986,25 @@ function draw(e) {
     const showEraserOnStylus = state.isDrawingMode && isPen && state.tool === 'eraser';
 
     if (showFullCursor || showEraserOnStylus) {
-        const c = eraserCursor;
+        const c = eraserCursor || _$('#eraser-cursor');
+        if (!c) return;
+
+        // Hide if over UI elements
+        if (e.target) {
+            const target = e.target;
+            const isUI = target.closest(
+                '#goodnotes-top-bar, #app-title-bar, #app-status-bar, #tab-proxy-layer, #sidebar, ' +
+                '.gn-popover, .modal-overlay, .ios-pwa-overlay, ' +
+                '.Island, .App-toolbar, .App-menu_top, .App-menu_bottom, .layer-ui__wrapper, .sidebar, .default-sidebar, ' +
+                '.HelpDialog, .Dialog, .dropdown-menu, .context-menu, .popover, .main-menu-trigger, .help-icon, .stats, .hint-toolbar, ' +
+                '.controls-arrow, .navigate-left, .navigate-right, .navigate-up, .navigate-down, .reveal .controls, .reveal .controls button'
+            );
+            if (isUI) {
+                c.style.display = 'none';
+                _upd('brush-preview', 'display', 'none', true);
+                return;
+            }
+        }
         if (c) {
             c.className = '';
             c.style.display = 'block';
@@ -8331,9 +8368,12 @@ function setupEventListeners() {
         menu.classList.toggle('hidden');
     });
     _on('#btn-clear-slide', 'click', () => {
-        state.annotations.set(getCurrentAnnotationKey(), []);
-        state.excalidrawScenes.delete(getCurrentAnnotationKey());
+        const key = getCurrentAnnotationKey();
+        state.annotations.set(key, []);
+        state.excalidrawScenes.delete(key);
         if (state.annotationEngine === 'excalidraw' && window.QuartoInkExcalidraw) {
+            window.QuartoInkExcalidraw.unmount();
+            state.lastMountedSlideKey = null; // Force fresh mount
             syncAnnotationEngineMount();
         }
         redraw(); saveToLocalStorage(); addToHistory(); updateSidebar();
@@ -8344,6 +8384,8 @@ function setupEventListeners() {
         state.annotations.clear();
         state.excalidrawScenes.clear();
         if (state.annotationEngine === 'excalidraw' && window.QuartoInkExcalidraw) {
+            window.QuartoInkExcalidraw.unmount();
+            state.lastMountedSlideKey = null; // Force fresh mount
             syncAnnotationEngineMount();
         }
         redraw(); saveToLocalStorage(); addToHistory(); updateSidebar();
@@ -8599,7 +8641,7 @@ function setupEventListeners() {
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
     document.addEventListener('mousemove', (e) => {
-        syncExcalidrawEraserCursor(e.clientX, e.clientY);
+        syncExcalidrawEraserCursor(e.clientX, e.clientY, e);
         // Brush Preview Logic
         const preview = _$('#brush-preview');
         if (preview && preview.style.display !== 'none') {
@@ -8617,7 +8659,7 @@ function setupEventListeners() {
     });
     window.addEventListener('pointermove', (e) => {
         syncExcalidrawEraserCursor(e.clientX, e.clientY, e);
-    }, { passive: true });
+    }, { passive: true, capture: true });
 
     canvas.addEventListener('pointerdown', startDrawing, { passive: false });
     canvas.addEventListener('pointermove', draw, { passive: false });
