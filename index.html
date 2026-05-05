@@ -4182,6 +4182,7 @@ const state = {
     slideMetricsBySlide: new Map(),
     _fingerSwipeTouch: null,
     _lastPointerSwipeStartTs: 0,
+    _lastTouchSwipeStartTs: 0,
     _fingerGestureBlocksExcalCanvas: false
 };
 
@@ -6352,6 +6353,12 @@ function onFingerSwipePointerDownCapture(e) {
     if (!state.isDrawingMode) return;
     if (state.annotationEngine !== 'excalidraw') return;
     if (excalidrawUsesInkCanvasInteractions()) return;
+    if (state._fingerSwipeTouch && (performance.now() - (state._lastTouchSwipeStartTs || 0) < 700)) {
+        e.preventDefault();
+        e.stopPropagation();
+        hideFingerGestureCursors();
+        return;
+    }
     if (!isFingerTouchPointer(e)) return;
     if (!isFingerSwipeGestureTarget(e.target)) return;
     e.preventDefault();
@@ -6359,6 +6366,7 @@ function onFingerSwipePointerDownCapture(e) {
     state._lastPointerSwipeStartTs = performance.now();
     state._fingerSwipeTouch = null;
     setExcalidrawCanvasInputBlocked(true);
+    hideFingerGestureCursors();
     state._fingerSwipe = { x0: e.clientX, y0: e.clientY, t0: performance.now(), pid: e.pointerId };
 }
 
@@ -6376,7 +6384,9 @@ function onFingerSwipeTouchStartCapture(e) {
     if (isLikelyStylusTouchPoint(t)) return;
     e.preventDefault();
     e.stopPropagation();
+    state._lastTouchSwipeStartTs = performance.now();
     setExcalidrawCanvasInputBlocked(true);
+    hideFingerGestureCursors();
     state._fingerSwipeTouch = { x0: t.clientX, y0: t.clientY, t0: performance.now() };
 }
 
@@ -6637,6 +6647,13 @@ function setExcalidrawCanvasInputBlocked(blocked) {
     host.querySelectorAll('.excalidraw canvas.excalidraw__canvas').forEach((cv) => {
         cv.style.pointerEvents = blocked ? 'none' : '';
     });
+}
+
+function hideFingerGestureCursors() {
+    const ec = eraserCursor || _$('#eraser-cursor');
+    if (ec) ec.style.display = 'none';
+    const bp = _$('#brush-preview');
+    if (bp) bp.style.display = 'none';
 }
 
 function ensureEraserTailLayer() {
