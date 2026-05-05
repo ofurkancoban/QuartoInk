@@ -6362,14 +6362,14 @@ function onFingerSwipePointerDownCapture(e) {
     if (excalidrawUsesInkCanvasInteractions()) return;
     if (state._fingerSwipeTouch && (performance.now() - (state._lastTouchSwipeStartTs || 0) < 700)) {
         e.preventDefault();
-        e.stopPropagation();
+        e.stopImmediatePropagation();
         hideFingerGestureCursors();
         return;
     }
     if (!isFingerTouchPointer(e)) return;
     if (!isFingerSwipeGestureTarget(e.target)) return;
     e.preventDefault();
-    e.stopPropagation();
+    e.stopImmediatePropagation();
     state._lastPointerSwipeStartTs = performance.now();
     state._fingerSwipeTouch = null;
     clearFingerCanvasUnblockFailsafe();
@@ -6392,7 +6392,7 @@ function onFingerSwipeTouchStartCapture(e) {
     if (!t) return;
     if (isLikelyStylusTouchPoint(t)) return;
     e.preventDefault();
-    e.stopPropagation();
+    e.stopImmediatePropagation();
     state._lastTouchSwipeStartTs = performance.now();
     clearFingerCanvasUnblockFailsafe();
     setExcalidrawCanvasInputBlocked(true);
@@ -6596,18 +6596,37 @@ function getPos(e) {
 
 function isLikelyStylusPointer(e) {
     if (!e) return false;
+    // Apple Pencil and other active styli always report pointerType 'pen'
     if (e.pointerType === 'pen') return true;
     if (e.pointerType !== 'touch') return false;
+    // Safari on iPad exposes touchType='stylus' for Apple Pencil
     if (typeof e.touchType === 'string' && e.touchType.toLowerCase() === 'stylus') return true;
-    if (typeof e.altitudeAngle === 'number' && e.altitudeAngle > 0) return true;
-    if (typeof e.azimuthAngle === 'number' && e.azimuthAngle > 0) return true;
-    if ((typeof e.tiltX === 'number' && e.tiltX !== 0) || (typeof e.tiltY === 'number' && e.tiltY !== 0)) return true;
-    if (typeof e.twist === 'number' && e.twist !== 0) return true;
-    if (typeof e.pressure === 'number' && e.pressure > 0 && e.pressure !== 0.5) return true;
-    if (typeof e.width === 'number' && typeof e.height === 'number') {
-        const contactPatch = Math.max(e.width || 0, e.height || 0);
-        if (contactPatch > 0 && contactPatch <= 6) return true;
+
+    // --- Heuristic zone for touch events that might be stylus ---
+    // On iPad, finger touches can report:
+    //   altitudeAngle = PI/2 (perpendicular default), azimuthAngle = 0,
+    //   tiltX/tiltY = 0, pressure varies (0..1), width/height ~30-50px.
+    // Apple Pencil (when mis-reported as 'touch') has:
+    //   altitudeAngle < PI/2, non-zero tilt, width/height ~1-3px.
+    // We require a SMALL contact patch as the primary gate, then check
+    // for supporting tilt/altitude signals.
+
+    const hasSmallPatch = typeof e.width === 'number' && typeof e.height === 'number' &&
+        Math.max(e.width || 0, e.height || 0) > 0 &&
+        Math.max(e.width || 0, e.height || 0) <= 6;
+
+    if (hasSmallPatch) {
+        // Small contact patch + any tilt/altitude signal => very likely stylus
+        const hasTilt = (typeof e.tiltX === 'number' && e.tiltX !== 0) ||
+                        (typeof e.tiltY === 'number' && e.tiltY !== 0);
+        const hasAngle = (typeof e.altitudeAngle === 'number' && e.altitudeAngle > 0 && e.altitudeAngle < (Math.PI / 2 - 0.01));
+        const hasAzimuth = typeof e.azimuthAngle === 'number' && e.azimuthAngle > 0;
+        const hasTwist = typeof e.twist === 'number' && e.twist !== 0;
+        if (hasTilt || hasAngle || hasAzimuth || hasTwist) return true;
+        // Small patch alone (no tilt info) is still suspicious enough
+        return true;
     }
+
     return false;
 }
 
