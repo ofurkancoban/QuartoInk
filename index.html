@@ -4179,7 +4179,8 @@ const state = {
     excalPaletteTheme: null,
     excalidrawScenes: new Map(),
     /** Per deck slide (e.g. "0-0"): slide rect in #canvas-overlay space (see slideMetricsToOverlaySpace). */
-    slideMetricsBySlide: new Map()
+    slideMetricsBySlide: new Map(),
+    _fingerSwipeTouch: null
 };
 
 // --- COORDINATE NORMALIZATION ---
@@ -6343,6 +6344,45 @@ function onFingerSwipePointerDownCapture(e) {
     state._fingerSwipe = { x0: e.clientX, y0: e.clientY, t0: performance.now(), pid: e.pointerId };
 }
 
+function onFingerSwipeTouchStartCapture(e) {
+    if (!state.isDrawingMode) return;
+    if (state.annotationEngine !== 'excalidraw') return;
+    if (excalidrawUsesInkCanvasInteractions()) return;
+    if (!e.touches || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    if (!t) return;
+    e.preventDefault();
+    e.stopPropagation();
+    state._fingerSwipeTouch = { x0: t.clientX, y0: t.clientY, t0: performance.now() };
+}
+
+function onFingerSwipeTouchMoveCapture(e) {
+    if (!state._fingerSwipeTouch) return;
+    if (!e.touches || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    if (!t) return;
+    const s = state._fingerSwipeTouch;
+    const dx = t.clientX - s.x0;
+    const dy = t.clientY - s.y0;
+    const ax = Math.abs(dx);
+    const ay = Math.abs(dy);
+    if (Math.max(ax, ay) > 22 && (ax > ay * 1.1 || ay > ax * 1.1)) e.preventDefault();
+}
+
+function onFingerSwipeTouchEndCapture(e) {
+    if (!state._fingerSwipeTouch) return;
+    const s = state._fingerSwipeTouch;
+    state._fingerSwipeTouch = null;
+    const t = e.changedTouches && e.changedTouches[0];
+    if (!t) return;
+    const dt = performance.now() - s.t0;
+    tryNavigateFromSwipe(t.clientX - s.x0, t.clientY - s.y0, dt);
+}
+
+function onFingerSwipeTouchCancelCapture() {
+    state._fingerSwipeTouch = null;
+}
+
 function shouldRenderExcalEraserTailFromEventTarget(target) {
     if (!(state.annotationEngine === 'excalidraw' && state.isDrawingMode && state.tool === 'eraser')) return false;
     const host = _$('#excalidraw-host');
@@ -8444,6 +8484,10 @@ function setupEventListeners() {
     window.addEventListener('pointerup', onFingerSwipePointerUp, true);
     window.addEventListener('pointercancel', onFingerSwipePointerCancel, true);
     window.addEventListener('pointerdown', onFingerSwipePointerDownCapture, { capture: true, passive: false });
+    window.addEventListener('touchstart', onFingerSwipeTouchStartCapture, { capture: true, passive: false });
+    window.addEventListener('touchmove', onFingerSwipeTouchMoveCapture, { capture: true, passive: false });
+    window.addEventListener('touchend', onFingerSwipeTouchEndCapture, { capture: true, passive: false });
+    window.addEventListener('touchcancel', onFingerSwipeTouchCancelCapture, { capture: true, passive: false });
     window.addEventListener('pointerdown', onExcalEraserTailPointerDown, true);
     window.addEventListener('pointermove', onExcalEraserTailPointerMove, true);
     window.addEventListener('pointerup', onExcalEraserTailPointerUpOrCancel, true);
