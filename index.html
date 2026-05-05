@@ -3470,7 +3470,7 @@ function syncModeUI() {
 function syncExcalidrawEraserCursor(clientX, clientY, pointerEvent) {
     const c = eraserCursor || _$('#eraser-cursor');
     if (!c) return;
-    if (pointerEvent && isFingerTouchPointer(pointerEvent)) {
+    if (state._fingerSwipe || state._fingerSwipeTouch || (pointerEvent && isFingerTouchPointer(pointerEvent))) {
         c.style.display = 'none';
         return;
     }
@@ -4182,6 +4182,7 @@ const state = {
     slideMetricsBySlide: new Map(),
     _fingerSwipeTouch: null,
     _lastPointerSwipeStartTs: 0,
+    _fingerCanvasBlockTimer: null,
     _lastTouchSwipeStartTs: 0,
     _fingerGestureBlocksExcalCanvas: false
 };
@@ -6326,6 +6327,7 @@ function onFingerSwipePointerUp(e) {
     if (!state._fingerSwipe || e.pointerId !== state._fingerSwipe.pid) return;
     const s = state._fingerSwipe;
     state._fingerSwipe = null;
+    clearFingerCanvasUnblockFailsafe();
     setExcalidrawCanvasInputBlocked(false);
     try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
     const dt = performance.now() - s.t0;
@@ -6335,6 +6337,7 @@ function onFingerSwipePointerUp(e) {
 function onFingerSwipePointerCancel(e) {
     if (!state._fingerSwipe || e.pointerId !== state._fingerSwipe.pid) return;
     state._fingerSwipe = null;
+    clearFingerCanvasUnblockFailsafe();
     setExcalidrawCanvasInputBlocked(false);
     try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
 }
@@ -6365,7 +6368,9 @@ function onFingerSwipePointerDownCapture(e) {
     e.stopPropagation();
     state._lastPointerSwipeStartTs = performance.now();
     state._fingerSwipeTouch = null;
+    clearFingerCanvasUnblockFailsafe();
     setExcalidrawCanvasInputBlocked(true);
+    armFingerCanvasUnblockFailsafe();
     hideFingerGestureCursors();
     state._fingerSwipe = { x0: e.clientX, y0: e.clientY, t0: performance.now(), pid: e.pointerId };
 }
@@ -6385,7 +6390,9 @@ function onFingerSwipeTouchStartCapture(e) {
     e.preventDefault();
     e.stopPropagation();
     state._lastTouchSwipeStartTs = performance.now();
+    clearFingerCanvasUnblockFailsafe();
     setExcalidrawCanvasInputBlocked(true);
+    armFingerCanvasUnblockFailsafe();
     hideFingerGestureCursors();
     state._fingerSwipeTouch = { x0: t.clientX, y0: t.clientY, t0: performance.now() };
 }
@@ -6407,6 +6414,7 @@ function onFingerSwipeTouchEndCapture(e) {
     if (!state._fingerSwipeTouch || state._fingerSwipe) return;
     const s = state._fingerSwipeTouch;
     state._fingerSwipeTouch = null;
+    clearFingerCanvasUnblockFailsafe();
     setExcalidrawCanvasInputBlocked(false);
     const t = e.changedTouches && e.changedTouches[0];
     if (!t) return;
@@ -6416,6 +6424,7 @@ function onFingerSwipeTouchEndCapture(e) {
 
 function onFingerSwipeTouchCancelCapture() {
     state._fingerSwipeTouch = null;
+    clearFingerCanvasUnblockFailsafe();
     setExcalidrawCanvasInputBlocked(false);
 }
 
@@ -6656,6 +6665,26 @@ function hideFingerGestureCursors() {
     if (bp) bp.style.display = 'none';
 }
 
+function armFingerCanvasUnblockFailsafe() {
+    if (state._fingerCanvasBlockTimer) {
+        clearTimeout(state._fingerCanvasBlockTimer);
+        state._fingerCanvasBlockTimer = null;
+    }
+    state._fingerCanvasBlockTimer = setTimeout(() => {
+        state._fingerCanvasBlockTimer = null;
+        state._fingerSwipe = null;
+        state._fingerSwipeTouch = null;
+        setExcalidrawCanvasInputBlocked(false);
+        hideFingerGestureCursors();
+    }, 1800);
+}
+
+function clearFingerCanvasUnblockFailsafe() {
+    if (!state._fingerCanvasBlockTimer) return;
+    clearTimeout(state._fingerCanvasBlockTimer);
+    state._fingerCanvasBlockTimer = null;
+}
+
 function ensureEraserTailLayer() {
     if (eraserTailLayer && document.body.contains(eraserTailLayer)) return eraserTailLayer;
     const el = document.createElement('canvas');
@@ -6796,6 +6825,14 @@ function resetDrawingGestureState() {
 
 function startDrawing(e) {
     if (!state.isDrawingMode) return;
+    if (!isFingerTouchPointer(e)) {
+        clearFingerCanvasUnblockFailsafe();
+        if (state._fingerSwipe || state._fingerSwipeTouch || state._fingerGestureBlocksExcalCanvas) {
+            state._fingerSwipe = null;
+            state._fingerSwipeTouch = null;
+            setExcalidrawCanvasInputBlocked(false);
+        }
+    }
 
     // Inconsistent leftover flag (missed pointerup)
     if (state.isDragging && state.activePointerId === undefined) {
