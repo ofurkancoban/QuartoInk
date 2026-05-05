@@ -3467,9 +3467,13 @@ function syncModeUI() {
     updateTabProxyLayer();
 }
 
-function syncExcalidrawEraserCursor(clientX, clientY) {
+function syncExcalidrawEraserCursor(clientX, clientY, pointerEvent) {
     const c = eraserCursor || _$('#eraser-cursor');
     if (!c) return;
+    if (pointerEvent && isFingerTouchPointer(pointerEvent)) {
+        c.style.display = 'none';
+        return;
+    }
     const show =
         state.isDrawingMode &&
         state.annotationEngine === 'excalidraw' &&
@@ -6512,6 +6516,12 @@ function isTouchFirstDevice() {
 function isFingerTouchPointer(e) {
     if (!e || isLikelyStylusPointer(e)) return false;
     if (e.pointerType === 'touch') return true;
+    if (
+        e.pointerType === 'mouse' &&
+        isTouchFirstDevice() &&
+        e.sourceCapabilities &&
+        e.sourceCapabilities.firesTouchEvents
+    ) return true;
     // iPad Safari can occasionally emit non-touch pointerType for finger contact.
     // On touch-first devices, anything that's not an explicit pen is treated as finger.
     return isTouchFirstDevice() && e.pointerType !== 'mouse';
@@ -6657,7 +6667,6 @@ function resetDrawingGestureState() {
 
 function startDrawing(e) {
     if (!state.isDrawingMode) return;
-    if (state.annotationEngine === 'excalidraw' && !excalidrawUsesInkCanvasInteractions()) return;
 
     // Inconsistent leftover flag (missed pointerup)
     if (state.isDragging && state.activePointerId === undefined) {
@@ -6676,6 +6685,7 @@ function startDrawing(e) {
         try { canvas.setPointerCapture(e.pointerId); } catch (_e) {}
         return;
     }
+    if (state.annotationEngine === 'excalidraw' && !excalidrawUsesInkCanvasInteractions()) return;
 
     e.preventDefault();
 
@@ -8370,7 +8380,7 @@ function setupEventListeners() {
         }
     });
     window.addEventListener('pointermove', (e) => {
-        syncExcalidrawEraserCursor(e.clientX, e.clientY);
+        syncExcalidrawEraserCursor(e.clientX, e.clientY, e);
     }, { passive: true });
 
     canvas.addEventListener('pointerdown', startDrawing, { passive: false });
