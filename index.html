@@ -4546,7 +4546,7 @@ function parseAnnotationsPayload(raw) {
             };
         }
         const legacy = Array.isArray(o) ? o : [];
-        return { annotations: new Map(legacy), excalidrawScenes: new Map(), annotationEngine: 'ink' };
+        return { annotations: new Map(legacy), excalidrawScenes: new Map(), annotationEngine: 'excalidraw' };
     } catch (_e) {
         return { annotations: new Map(), excalidrawScenes: new Map(), annotationEngine: 'excalidraw' };
     }
@@ -4943,7 +4943,7 @@ function loadFromLocalStorage() {
         const parsed = parseAnnotationsPayload(data);
         state.annotations = parsed.annotations;
         state.excalidrawScenes = parsed.excalidrawScenes;
-        state.annotationEngine = parsed.annotationEngine;
+        state.annotationEngine = isIPadLikeTouchDevice() ? 'excalidraw' : parsed.annotationEngine;
 
         redraw();
         syncThicknessUI();
@@ -5943,6 +5943,10 @@ window.processFileContent = function(content, file) {
     state.tool = 'pen';
     state.isDrawingMode = true;
     loadFromLocalStorage();
+    if (isIPadLikeTouchDevice() && state.annotationEngine !== 'excalidraw') {
+        state.annotationEngine = 'excalidraw';
+        ensureExcalidrawRuntime().then((ok) => { if (ok) syncAnnotationEngineMount(); });
+    }
     addToHistory();
     syncThicknessUI();
     updateSidebar();
