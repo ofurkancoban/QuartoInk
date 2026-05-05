@@ -6513,6 +6513,15 @@ function isTouchFirstDevice() {
     }
 }
 
+function isIPadLikeTouchDevice() {
+    try {
+        const ua = navigator.userAgent || '';
+        return /iPad/.test(ua) || (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1);
+    } catch (_e) {
+        return false;
+    }
+}
+
 function isFingerTouchPointer(e) {
     if (!e || isLikelyStylusPointer(e)) return false;
     if (e.pointerType === 'touch') return true;
@@ -6522,6 +6531,7 @@ function isFingerTouchPointer(e) {
         e.sourceCapabilities &&
         e.sourceCapabilities.firesTouchEvents
     ) return true;
+    if (e.pointerType === 'mouse' && isIPadLikeTouchDevice()) return true;
     // iPad Safari can occasionally emit non-touch pointerType for finger contact.
     // On touch-first devices, anything that's not an explicit pen is treated as finger.
     return isTouchFirstDevice() && e.pointerType !== 'mouse';
