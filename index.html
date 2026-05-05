@@ -6351,6 +6351,7 @@ function onFingerSwipePointerDownCapture(e) {
     if (state.annotationEngine !== 'excalidraw') return;
     if (excalidrawUsesInkCanvasInteractions()) return;
     if (!isFingerTouchPointer(e)) return;
+    if (!isFingerSwipeGestureTarget(e.target)) return;
     const host = _$('#excalidraw-host');
     if (host) host.style.pointerEvents = 'none';
     e.preventDefault();
@@ -6363,9 +6364,11 @@ function onFingerSwipeTouchStartCapture(e) {
     if (!state.isDrawingMode) return;
     if (state.annotationEngine !== 'excalidraw') return;
     if (excalidrawUsesInkCanvasInteractions()) return;
+    if (!isFingerSwipeGestureTarget(e.target)) return;
     if (!e.touches || e.touches.length !== 1) return;
     const t = e.touches[0];
     if (!t) return;
+    if (isLikelyStylusTouchPoint(t)) return;
     const host = _$('#excalidraw-host');
     if (host) host.style.pointerEvents = 'none';
     e.preventDefault();
@@ -6600,10 +6603,27 @@ function isFingerTouchPointer(e) {
         e.sourceCapabilities &&
         e.sourceCapabilities.firesTouchEvents
     ) return true;
-    if (e.pointerType === 'mouse' && isIPadLikeTouchDevice()) return true;
-    // iPad Safari can occasionally emit non-touch pointerType for finger contact.
-    // On touch-first devices, anything that's not an explicit pen is treated as finger.
-    return isTouchFirstDevice() && e.pointerType !== 'mouse';
+    return false;
+}
+
+function isLikelyStylusTouchPoint(touchPoint) {
+    if (!touchPoint) return false;
+    return typeof touchPoint.touchType === 'string' && touchPoint.touchType.toLowerCase() === 'stylus';
+}
+
+function isFingerSwipeGestureTarget(target) {
+    const host = _$('#excalidraw-host');
+    if (!host || host.style.display === 'none') return false;
+    if (!target || typeof target !== 'object' || !host.contains(target)) return false;
+    if (target.closest && (
+        target.closest('.layer-ui__wrapper') ||
+        target.closest('.Island') ||
+        target.closest('.App-menu_top') ||
+        target.closest('.App-menu_bottom') ||
+        target.closest('.mobile-misc-tools-container') ||
+        target.closest('button, a, input, textarea, select, [role="button"], [contenteditable="true"]')
+    )) return false;
+    return true;
 }
 
 function ensureEraserTailLayer() {
