@@ -18,12 +18,12 @@ const distDir = path.join(widgetRoot, 'node_modules', '@excalidraw', 'excalidraw
 /** Üst sıra: siyah + Quarto önayarları (title / toolbar ile aynı tonlar). */
 const STROKE_TOP_PICKS_MIN_FROM = 'g=[m.black,m.red[d],m.green[d],m.blue[d],m.yellow[d]]';
 const STROKE_TOP_PICKS_MIN_TO =
-  'g=["#000000","#e03131","#2f9e44","#1971c2","#f08c00"]';
+  'g=["#000000","#6366f1","#06b6d4","#ef4444","#10b981"]';
 
 const STROKE_TOP_PICKS_DEV_FROM =
   'DEFAULT_ELEMENT_STROKE_PICKS = [COLOR_PALETTE.black, COLOR_PALETTE.red[DEFAULT_ELEMENT_STROKE_COLOR_INDEX], COLOR_PALETTE.green[DEFAULT_ELEMENT_STROKE_COLOR_INDEX], COLOR_PALETTE.blue[DEFAULT_ELEMENT_STROKE_COLOR_INDEX], COLOR_PALETTE.yellow[DEFAULT_ELEMENT_STROKE_COLOR_INDEX]]';
 const STROKE_TOP_PICKS_DEV_TO =
-  'DEFAULT_ELEMENT_STROKE_PICKS = ["#000000","#e03131","#2f9e44","#1971c2","#f08c00"]';
+  'DEFAULT_ELEMENT_STROKE_PICKS = ["#000000","#6366f1","#06b6d4","#ef4444","#10b981"]';
 
 /** Minified + JSON.parse içi: open-color gray son üç gölge → siyah */
 const GRAY_TAIL_FROM = '"#868e96","#495057","#343a40","#212529"]';
