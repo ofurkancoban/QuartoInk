@@ -2782,6 +2782,7 @@ h1, h2, h3 {
 <script src="assets/ui/quarto-ink-export.js" defer></script>
 <script src="assets/ui/quarto-ink-search.js" defer></script>
 <script src="assets/ui/quarto-ink-notes.js" defer></script>
+<script src="assets/ui/quarto-ink-whiteboard.js" defer></script>
     <script>
     (function() {
         var saved = localStorage.getItem('gn_theme');
@@ -3131,6 +3132,8 @@ h1, h2, h3 {
                 <div class="shortcut-item"><span>Lasso</span> <span class="kbd">S</span></div>
                 <div class="shortcut-item"><span>Navigate</span> <span class="kbd">Space</span></div>
                 <div class="shortcut-item"><span>Undo / Redo</span> <span class="kbd">⌘Z / ⌘Y</span></div>
+                <div class="shortcut-item"><span>Blank page after slide</span> <span class="kbd">B</span></div>
+                <div class="shortcut-item"><span>Search slides</span> <span class="kbd">⌘F</span></div>
             </div>
             <div class="modal-social">
                 <div class="modal-social-label">Developer</div>
@@ -4153,6 +4156,11 @@ const state = {
     linkRects: [],
     /** The user's notes per slide key (assets/ui/quarto-ink-notes.js). */
     slideNotes: new Map(),
+    /** Blank pages per slide key, [{ id, style }], and the one shown (assets/ui/quarto-ink-whiteboard.js). */
+    whiteboards: new Map(),
+    currentWhiteboard: null,
+    /** Reveal.availableFragments() of the current slide, from the bridge. */
+    fragmentsAvailable: null,
     rawTabRects: [],
     slideCount: 1,
     slides: [], // Full slide list from bridge
@@ -4294,6 +4302,7 @@ function forwardIframeLinkPointerDown(clientX, clientY) {
 function resolveIframeInteractiveLinkAt(clientX, clientY) {
     const f = state.ui.frame || _$('#content-frame');
     if (!f || !Array.isArray(state.linkRects) || !state.linkRects.length) return null;
+    if (window.QuartoInkWhiteboard && window.QuartoInkWhiteboard.current()) return null;
     const fr = f.getBoundingClientRect();
     const ix = clientX - fr.left;
     const iy = clientY - fr.top;
@@ -4562,7 +4571,7 @@ function qiRemoveAnnotations(key) {
 }
 
 function parseAnnotationsPayload(raw) {
-    const empty = () => ({ annotations: new Map(), excalidrawScenes: new Map(), slideNotes: new Map(), annotationEngine: 'excalidraw' });
+    const empty = () => ({ annotations: new Map(), excalidrawScenes: new Map(), slideNotes: new Map(), whiteboards: new Map(), annotationEngine: 'excalidraw' });
     if (!raw) return empty();
     try {
         const o = JSON.parse(raw);
@@ -4571,6 +4580,7 @@ function parseAnnotationsPayload(raw) {
                 annotations: new Map(o.annotations || []),
                 excalidrawScenes: new Map(o.excalidrawScenes || []),
                 slideNotes: new Map(Array.isArray(o.slideNotes) ? o.slideNotes : []),
+                whiteboards: new Map(Array.isArray(o.whiteboards) ? o.whiteboards : []),
                 annotationEngine: o.annotationEngine === 'ink' ? 'ink' : 'excalidraw'
             };
         }
@@ -4587,6 +4597,7 @@ function stringifyAnnotationsPayload() {
         annotations: Array.from(state.annotations.entries()),
         excalidrawScenes: Array.from(state.excalidrawScenes.entries()),
         slideNotes: Array.from((state.slideNotes || new Map()).entries()),
+        whiteboards: Array.from((state.whiteboards || new Map()).entries()),
         annotationEngine: state.annotationEngine
     });
 }
@@ -5244,9 +5255,37 @@ function setCurrentTabScope(scope) {
     if (changed) state.selectedAnnotations = [];
     return changed;
 }
-function getCurrentAnnotationKey(slideKey = state.currentSlide, tabScope = state.currentTabScope) {
+function getCurrentAnnotationKey(slideKey, tabScope) {
+    // What the user sees now: on a blank page, its own key.
+    if (slideKey === undefined && tabScope === undefined && window.QuartoInkWhiteboard) {
+        const pageKey = window.QuartoInkWhiteboard.currentKey();
+        if (pageKey) return pageKey;
+    }
+    if (slideKey === undefined) slideKey = state.currentSlide;
+    if (tabScope === undefined) tabScope = state.currentTabScope;
     const normalizedScope = normalizeTabScope(tabScope);
     return normalizedScope ? `${slideKey}::tab:${normalizedScope}` : slideKey;
+}
+/**
+ * Change what the ink belongs to (e.g. a blank page instead of the slide): save and unmount
+ * the drawing layer of the old target, apply `change`, and mount the new one.
+ */
+function qiSwitchAnnotationTarget(change) {
+    flushExcalidrawSceneToStorageForCurrentKey();
+    if (state.annotationEngine === 'excalidraw' && window.QuartoInkExcalidraw) {
+        window.QuartoInkExcalidraw.unmount();
+        state.lastMountedSlideKey = null;
+    }
+    change();
+    state.selectedAnnotations = [];
+    redraw();
+    updateSidebar();
+    updateTabProxyLayer();
+    saveToLocalStorage();
+    if (state.annotationEngine === 'excalidraw') {
+        syncAnnotationEngineMount();
+        scheduleSyncAnnotationEngineMount();
+    }
 }
 function getAnnotationsForKey(key) {
     return state.annotations.get(key) || [];
@@ -5378,6 +5417,8 @@ function loadFromLocalStorage() {
         state.annotations = parsed.annotations;
         state.excalidrawScenes = parsed.excalidrawScenes;
         state.slideNotes = parsed.slideNotes;
+        state.whiteboards = parsed.whiteboards;
+        state.currentWhiteboard = null;
         state.annotationEngine = isIPadLikeTouchDevice() ? 'excalidraw' : parsed.annotationEngine;
         if (window.QuartoInkNotes) window.QuartoInkNotes.sync();
 
@@ -5743,6 +5784,25 @@ window.processFileContent = function(content, file) {
                         }
                     }
 
+                    // The whole slide area (the scaled .slides element), not just the current slide's content box.
+                    function qiSlidesBox() {
+                        try {
+                            var r = window.Reveal.getSlidesElement().getBoundingClientRect();
+                            return { x: r.left, y: r.top, width: r.width, height: r.height };
+                        } catch (_e) { return null; }
+                    }
+
+                    // Where Next/Prev lead into or within the host's blank pages, the host navigates
+                    // (QI_NAV_LOCK): keys and swipes are held back from Reveal and sent to it.
+                    window.__qiNavLock = { next: false, prev: false };
+                    function qiDeckNavigate(dir) {
+                        if (window.__qiNavLock[dir === 'Next' ? 'next' : 'prev']) {
+                            window.parent.postMessage({ type: 'NAV_REQUEST', dir: dir }, QI_PARENT_ORIGIN);
+                        } else if (typeof window.__annotatorNavigate === 'function') {
+                            window.__annotatorNavigate(dir);
+                        }
+                    }
+
                     // In-deck links (#/slide-id, #/2/1, #ref-...): hash navigation is blocked in this
                     // sandboxed blob document, so show the target slide with Reveal instead.
                     function revealGotoHash(href) {
@@ -6069,6 +6129,7 @@ window.processFileContent = function(content, file) {
                                     window.parent.postMessage({ 
                                         type: 'METRICS_UPDATE',
                                         x: b.left, y: b.top, width: b.width, height: b.height,
+                                        slidesBox: qiSlidesBox(),
                                         scale: window.Reveal.getScale(),
                                         computedSlideSize: size,
                                         indexh: idx.h,
@@ -6099,7 +6160,8 @@ window.processFileContent = function(content, file) {
                                     linear: (typeof window.Reveal.getSlidePastCount === 'function' ? window.Reveal.getSlidePastCount() : 0) + 1,
                                     tabScope: getActiveTabScope(),
                                     tabRects: tabRectsPayload,
-                                    indexf: typeof idx.f === 'number' ? idx.f : null
+                                    indexf: typeof idx.f === 'number' ? idx.f : null,
+                                    fragments: window.Reveal.availableFragments()
                                 }, QI_PARENT_ORIGIN);
                                 window.parent.postMessage({ type: 'TAB_RECTS', rects: tabRectsPayload }, QI_PARENT_ORIGIN);
                                 sendLinkRects();
@@ -6137,11 +6199,11 @@ window.processFileContent = function(content, file) {
                             if (ax < minD && ay < minD) return;
                             if (typeof window.__annotatorNavigate !== 'function') return;
                             if (ax > ay * ratio) {
-                                if (dx < 0) window.__annotatorNavigate('Next');
-                                else window.__annotatorNavigate('Prev');
+                                if (dx < 0) qiDeckNavigate('Next');
+                                else qiDeckNavigate('Prev');
                             } else if (ay > ax * ratio) {
-                                if (dy < 0) window.__annotatorNavigate('Next');
-                                else window.__annotatorNavigate('Prev');
+                                if (dy < 0) qiDeckNavigate('Next');
+                                else qiDeckNavigate('Prev');
                             }
                         }, { passive: true });
                         window.addEventListener('touchcancel', function() { __deckSwipeT0 = 0; }, { passive: true });
@@ -6155,7 +6217,7 @@ window.processFileContent = function(content, file) {
                         try { window.Reveal.configure({ hash: false, history: false }); } catch (_e) {}
                         var sendFragment = function() {
                             var fi = window.Reveal.getIndices().f;
-                            window.parent.postMessage({ type: 'FRAGMENT_CHANGED', indexf: typeof fi === 'number' ? fi : null }, QI_PARENT_ORIGIN);
+                            window.parent.postMessage({ type: 'FRAGMENT_CHANGED', indexf: typeof fi === 'number' ? fi : null, fragments: window.Reveal.availableFragments() }, QI_PARENT_ORIGIN);
                             sendLinkRects();
                         };
                         window.Reveal.on('fragmentshown', sendFragment);
@@ -6215,7 +6277,7 @@ window.processFileContent = function(content, file) {
                              if (slide) {
                                  const b = slide.getBoundingClientRect();
                                  var _ri = window.Reveal.getIndices();
-                                 window.parent.postMessage({ type: 'METRICS_UPDATE', x: b.left, y: b.top, width: b.width, height: b.height, scale: window.Reveal.getScale(), indexh: _ri.h, indexv: _ri.v || 0 }, QI_PARENT_ORIGIN);
+                                 window.parent.postMessage({ type: 'METRICS_UPDATE', x: b.left, y: b.top, width: b.width, height: b.height, slidesBox: qiSlidesBox(), scale: window.Reveal.getScale(), indexh: _ri.h, indexv: _ri.v || 0 }, QI_PARENT_ORIGIN);
                              }
                              sendTabRects();
                         });
@@ -6412,6 +6474,9 @@ window.processFileContent = function(content, file) {
                                     }
                                 } catch (_scopeErr) {}
                             }
+                            if (e.data.type === 'QI_NAV_LOCK') {
+                                window.__qiNavLock = { next: !!e.data.next, prev: !!e.data.prev };
+                            }
                             if (e.data.type === 'RESYNC') {
                                 if (typeof window.__annotatorResync === 'function') window.__annotatorResync();
                             }
@@ -6454,7 +6519,14 @@ window.processFileContent = function(content, file) {
                     // Intercept Space in capture phase to prevent Reveal.js from advancing slides
                     window.addEventListener('keydown', e => {
                         const lowerKey = (e.key || '').toLowerCase();
-                        const interceptKeys = ['p', 'h', 'e', 'x', 't', 'r', 'c', 'a', 's', 'l', 'm'];
+                        const interceptKeys = ['p', 'h', 'e', 'x', 't', 'r', 'c', 'a', 's', 'l', 'm', 'b'];
+                        // Held back from Reveal while they lead into or within blank pages; the
+                        // host gets them below and navigates.
+                        const lockKeys = { arrowright: 'next', arrowdown: 'next', pagedown: 'next', n: 'next', arrowleft: 'prev', arrowup: 'prev', pageup: 'prev' };
+                        if (!e.ctrlKey && !e.metaKey && !e.altKey && lockKeys[lowerKey] && window.__qiNavLock && window.__qiNavLock[lockKeys[lowerKey]]) {
+                            e.preventDefault();
+                            e.stopImmediatePropagation();
+                        }
                         
                         if (e.key === ' ' || e.code === 'Space') {
                             e.preventDefault();
@@ -6659,8 +6731,9 @@ function mapTabRectsFromBridge(rawRects) {
 
 function updateTabProxyLayer() {
     let layer = _$('#tab-proxy-layer');
-    // Only show the proxy layer if we are in Excalidraw mode AND Drawing mode
-    const needsProxy = state.isDrawingMode && state.annotationEngine === 'excalidraw';
+    // Only show the proxy layer if we are in Excalidraw mode AND Drawing mode (and on a slide, not a blank page)
+    const onBlankPage = !!(window.QuartoInkWhiteboard && window.QuartoInkWhiteboard.current());
+    const needsProxy = state.isDrawingMode && state.annotationEngine === 'excalidraw' && !onBlankPage;
     
     if (!needsProxy) {
         if (layer) layer.style.display = 'none';
@@ -6745,6 +6818,10 @@ window.addEventListener('message', e => {
             e.data.scale
         );
         state.slideMetrics = smu;
+        if (e.data.slidesBox) {
+            const b = e.data.slidesBox;
+            state.slidesBox = slideMetricsToOverlaySpace(b.x, b.y, b.width, b.height, e.data.scale);
+        }
         if (e.data.indexh != null) {
             const sk = `${e.data.indexh}-${e.data.indexv != null ? e.data.indexv : 0}`;
             state.slideMetricsBySlide.set(sk, { ...smu });
@@ -6757,6 +6834,7 @@ window.addEventListener('message', e => {
             state.tabRects = mapTabRectsFromBridge(state.rawTabRects);
             updateTabProxyLayer();
         }
+        if (window.QuartoInkWhiteboard && state.currentWhiteboard) window.QuartoInkWhiteboard.render();
         if (state.annotationEngine === 'excalidraw' && window.QuartoInkExcalidraw) {
             const metricKey =
                 e.data.indexh != null
@@ -6772,7 +6850,7 @@ window.addEventListener('message', e => {
             key: e.data.key, code: e.data.code, 
             ctrlKey: e.data.ctrlKey, shiftKey: e.data.shiftKey, 
             altKey: e.data.altKey, metaKey: e.data.metaKey,
-            preventDefault: () => {}, stopPropagation: () => {}, target: { tagName: 'IFRAME' },
+            preventDefault: () => {}, stopPropagation: () => {}, stopImmediatePropagation: () => {}, target: { tagName: 'IFRAME' },
             fromBridge: true
         });
     }
@@ -6799,6 +6877,13 @@ window.addEventListener('message', e => {
     }
     if (e.data.type === 'FRAGMENT_CHANGED') {
         state.currentFragment = typeof e.data.indexf === 'number' ? e.data.indexf : null;
+        if (e.data.fragments) state.fragmentsAvailable = e.data.fragments;
+        if (window.QuartoInkWhiteboard) window.QuartoInkWhiteboard.render();
+        return;
+    }
+    if (e.data.type === 'NAV_REQUEST' && (e.data.dir === 'Next' || e.data.dir === 'Prev')) {
+        // A swipe in the deck that leads into or within blank pages.
+        navigateSlide(e.data.dir);
         return;
     }
     if (e.data.type === 'SLIDE_CHANGED' || e.data.type === 'INIT_STATE') {
@@ -6944,6 +7029,7 @@ function applyTabChangeMessage(data) {
 function applySlideChangeMessage(data) {
     clearTimeout(state._bridgeNavTimer);
     if ('indexf' in data) state.currentFragment = typeof data.indexf === 'number' ? data.indexf : null;
+    if (data.fragments) state.fragmentsAvailable = data.fragments;
     qiDebug('[Parent] Received', data.type, 'h:', data.indexh, 'v:', data.indexv, 'engine:', state.annotationEngine, 'drawingMode:', state.isDrawingMode, 'currentSlide:', state.currentSlide);
     if (Array.isArray(data.tabRects)) {
         state.rawTabRects = data.tabRects;
@@ -6972,6 +7058,7 @@ function applySlideChangeMessage(data) {
         return;
     }
 
+    if (window.QuartoInkWhiteboard) window.QuartoInkWhiteboard.onSlideChange(key);
     setCurrentTabScope(nextScope);
     state.currentSlide = key; 
     state.slideCount = data.total;
@@ -6995,6 +7082,8 @@ function applySlideChangeMessage(data) {
         qiDebug('[Parent] Engine is', state.annotationEngine, '- skipping Excalidraw remount');
     }
     
+    if (window.QuartoInkWhiteboard) window.QuartoInkWhiteboard.render();
+
     // Clear "Loading" status and update bridge health
     state.bridgeAlive = true;
     updateBridgeStatus(data.title || 'Reveal.js');
@@ -7186,6 +7275,8 @@ function navigateSlide(dir) {
         window.log('Navigation failed: content frame not ready', 'error');
         return;
     }
+    // Blank pages after a slide come before the next slide.
+    if (window.QuartoInkWhiteboard && window.QuartoInkWhiteboard.handleNavigate(dir)) return;
 
     // The deck is sandboxed: the bridge inside it navigates (fragments included).
     try { f.contentWindow.postMessage({ type: 'NAVIGATE', key: dir }, qiTargetOrigin()); } catch (_e) {}
@@ -7248,7 +7339,19 @@ function updateSidebar() {
             </div>
         `;
         
-        item.onclick = () => goToSlide(slide);
+        item.onclick = () => {
+            if (window.QuartoInkWhiteboard) window.QuartoInkWhiteboard.leave();
+            goToSlide(slide);
+        };
+        if (isActive && window.QuartoInkWhiteboard) {
+            const addPage = document.createElement('button');
+            addPage.type = 'button';
+            addPage.className = 'qi-wb-add';
+            addPage.title = 'Add a blank page after this slide (B)';
+            addPage.textContent = '+ page';
+            addPage.onclick = (e) => { e.stopPropagation(); window.QuartoInkWhiteboard.add(); };
+            item.appendChild(addPage);
+        }
         
         if (isActive) {
             // Smooth scroll into view if not visible
@@ -7256,6 +7359,19 @@ function updateSidebar() {
         }
         
         annotationList.appendChild(item);
+
+        if (window.QuartoInkWhiteboard) {
+            const shown = window.QuartoInkWhiteboard.current();
+            window.QuartoInkWhiteboard.pages(slideKey).forEach((page, i) => {
+                const sub = document.createElement('div');
+                sub.className = 'sidebar-item qi-wb-item' + (shown && shown.id === page.id ? ' active' : '');
+                const label = document.createElement('span');
+                label.textContent = `Blank page ${i + 1}`;
+                sub.appendChild(label);
+                sub.onclick = () => window.QuartoInkWhiteboard.enter(slideKey, page.id);
+                annotationList.appendChild(sub);
+            });
+        }
     });
 }
 
@@ -9148,6 +9264,12 @@ function handleKeyDown(e) {
     if (toolMap[lowerKey] && !e.ctrlKey && !e.metaKey) {
         const btn = _$(`#btn-${toolMap[lowerKey]}`);
         if (btn) btn.click();
+    }
+
+    // Blank page after the slide (or page) shown now
+    if (lowerKey === 'b' && !e.ctrlKey && !e.metaKey && !e.altKey && state.htmlContent && window.QuartoInkWhiteboard) {
+        window.QuartoInkWhiteboard.add();
+        return;
     }
 
     // Sidebar Toggle (Explicit check)

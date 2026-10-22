@@ -4,7 +4,8 @@
  * - PDF with or without ink: every slide in order, all fragments shown. A slide with Quarto
  *   tabs gets one page per tab, or, as chosen in the menu, only for the tabs with ink or
  *   only for the tab it shows. Every page carries its words as invisible text.
- *   On request, the user's notes go below the slide on its (first) page.
+ *   On request, the user's notes go below the slide on its (first) page. The blank pages
+ *   after a slide (assets/ui/quarto-ink-whiteboard.js) follow it in a PDF with ink.
  * - PNG: the current slide as it is shown, with its ink.
  *
  * For an exact copy of the deck, the deck iframe is laid out at the slide size with the deck's
@@ -185,6 +186,7 @@
             frame,
             style: frame.getAttribute('style'),
             box: slideBoxInOverlay(await agentCall('slidesRect')),
+            size: { width, height },
         };
         frame.style.setProperty('width', `${width}px`, 'important');
         frame.style.setProperty('height', `${height}px`, 'important');
@@ -265,7 +267,8 @@
         // Ink from the classic (non-Excalidraw) engine is on the overlay canvas.
         const classic = state.annotations.get(annotationKey);
         const overlay = document.getElementById('canvas-overlay');
-        if (classic && classic.length && overlay && overlay.clientWidth && state.currentSlide === slideKey) {
+        // Only for what is on screen now, as the overlay shows just that.
+        if (classic && classic.length && overlay && overlay.clientWidth && state.currentSlide === slideKey && annotationKey === getCurrentAnnotationKey()) {
             // The overlay follows the current (print) layout.
             redraw();
             const now = slideBoxInOverlay(await agentCall('slidesRect'));
@@ -595,7 +598,21 @@
         await agentCall('begin');
         const saved = await enterPrintLayout();
         try {
-            const page = await renderSlide();
+            const whiteboard = window.QuartoInkWhiteboard && window.QuartoInkWhiteboard.current();
+            let page;
+            if (whiteboard) {
+                // A blank page: its paper, sized like a rendered slide page.
+                const { width, height } = saved.size;
+                const template = {
+                    canvas: { width: Math.round(width * RENDER_SCALE), height: Math.round(height * RENDER_SCALE) },
+                    width,
+                    height,
+                    slideRect: await agentCall('slidesRect'),
+                };
+                page = window.QuartoInkWhiteboard.renderPage(template, whiteboard.page.style, width);
+            } else {
+                page = await renderSlide();
+            }
             if (annotations) await drawInk(page, state.currentSlide, getCurrentAnnotationKey(), saved.box);
             return page.canvas;
         } finally {
@@ -662,10 +679,12 @@
                 const scopes = await tabScopesToExport(slideKey, tabMode, annotations);
                 // The note goes on the first page of the slide only.
                 let note = withNotes && state.slideNotes ? (state.slideNotes.get(slideKey) || '').trim() : '';
+                let template = null; // a rendered page of this slide, for its blank pages
                 for (const scope of scopes) {
                     if (current.cancelled) break;
                     if (scope !== (await agentCall('activeTabScope')) && !(await agentCall('showTabScope', scope))) continue;
                     let page = await renderSlide();
+                    template = template || page;
                     if (annotations) await drawInk(page, slideKey, getCurrentAnnotationKey(slideKey, scope), layout.box);
                     if (note) {
                         page = appendNotes(page, note);
@@ -676,6 +695,17 @@
                         .then(async (blob) => new Uint8Array(await blob.arrayBuffer()));
                     jpeg.catch(() => {}); // reported when awaited; ignored after a cancel
                     pages.push({ jpeg, pixelWidth: page.canvas.width, pixelHeight: page.canvas.height, width: page.width, height: page.height, words: page.words });
+                }
+                // The slide's blank pages, after it (only with ink: without, they are empty).
+                const whiteboards = annotations && template && window.QuartoInkWhiteboard ? window.QuartoInkWhiteboard.pages(slideKey) : [];
+                for (const board of whiteboards) {
+                    if (current.cancelled) break;
+                    const page = window.QuartoInkWhiteboard.renderPage(template, board.style, layout.size.width);
+                    await drawInk(page, slideKey, window.QuartoInkWhiteboard.keyOf(slideKey, board.id), layout.box);
+                    const jpeg = canvasToBlob(page.canvas, 'image/jpeg', JPEG_QUALITY)
+                        .then(async (blob) => new Uint8Array(await blob.arrayBuffer()));
+                    jpeg.catch(() => {});
+                    pages.push({ jpeg, pixelWidth: page.canvas.width, pixelHeight: page.canvas.height, width: page.width, height: page.height, words: [] });
                 }
             }
             if (!current.cancelled) {

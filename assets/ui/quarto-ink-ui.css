@@ -770,6 +770,80 @@ button.gn-color-swatch:focus-visible,
     font-size: 0.68rem;
     color: var(--text-dim);
 }
+/* Blank pages: a paper sheet over the deck, its toolbar, and their entries in the navigator */
+#qi-whiteboard {
+    display: none;
+    position: absolute;
+    inset: 0;
+    z-index: 5; /* over the deck, under the ink layers */
+    background-color: #ffffff;
+}
+.qi-wb-slide-box {
+    position: absolute;
+    outline: 1px dashed rgba(29, 27, 23, 0.16);
+    pointer-events: none;
+}
+#qi-whiteboard-chip {
+    display: none;
+    position: absolute;
+    z-index: 14; /* above the drawing layer, so it stays clickable */
+    align-items: center;
+    gap: 8px;
+    padding: 4px 6px 4px 12px;
+    border: 1px solid var(--qi-line);
+    border-radius: 999px;
+    background: var(--surface-glass-strong);
+    box-shadow: 2px 2px 0 var(--qi-hard-shadow);
+    font-size: 0.76rem;
+    color: var(--text-secondary);
+}
+.qi-wb-title {
+    font-family: var(--qi-font-hand);
+    font-size: 0.86rem;
+    color: var(--accent);
+}
+.qi-wb-styles { display: flex; gap: 2px; padding: 2px; border-radius: 999px; background: var(--active-bg); }
+.qi-wb-styles button,
+.qi-wb-delete {
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 0.72rem;
+    padding: 3px 9px;
+    border-radius: 999px;
+    cursor: pointer;
+}
+.qi-wb-styles button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.qi-wb-delete { display: flex; padding: 4px; }
+.qi-wb-delete svg { width: 15px; height: 15px; }
+.qi-wb-delete:hover { color: var(--danger); }
+.sidebar-item.qi-wb-item {
+    margin: -2px 0 8px 30px;
+    padding: 7px 12px;
+    font-family: var(--qi-font-hand);
+    font-size: 0.86rem;
+    color: var(--text-muted);
+    background-image: none;
+    border-style: dashed;
+}
+.sidebar-item.qi-wb-item.active { color: var(--accent); border-style: solid; }
+.qi-wb-add {
+    position: absolute;
+    right: 10px;
+    bottom: -9px;
+    padding: 1px 8px;
+    border: 1px solid var(--qi-line-strong);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text-secondary);
+    font-family: var(--qi-font-hand);
+    font-size: 0.78rem;
+    cursor: pointer;
+    z-index: 1;
+}
+.qi-wb-add:hover { color: var(--accent); border-color: var(--border-active); }
+
 /* The user's notes for the current slide, at the bottom of the navigator */
 .qi-notes-panel {
     margin-top: auto;
