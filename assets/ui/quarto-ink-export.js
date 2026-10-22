@@ -431,6 +431,10 @@
             // Always a string, so html-to-image never runs its own font collection.
             fontEmbedCSS,
             filter: keep,
+            // Patched renderer (excalidraw-widget/scripts/renderer-patches.mjs): copy only the
+            // styles the copy would not compute by itself, which makes each page several times faster.
+            qiCompactStyles: true,
+            qiRoot: body,
         });
         ctx.drawImage(content, 0, 0, canvas.width, canvas.height);
         // Where the slide sits on the page (in page px): the ink is mapped onto this box.
@@ -782,12 +786,16 @@
                     if (scope !== activeTabScope(win) && !(await showTabScope(win, scope))) continue;
                     const page = await renderSlide(win, cache);
                     if (annotations) await drawInk(win, page, slideKey, getCurrentAnnotationKey(slideKey, scope), layout.box);
-                    const jpeg = new Uint8Array(await (await canvasToBlob(page.canvas, 'image/jpeg', JPEG_QUALITY)).arrayBuffer());
+                    // Encoded while the next slide renders; awaited before the PDF is written.
+                    const jpeg = canvasToBlob(page.canvas, 'image/jpeg', JPEG_QUALITY)
+                        .then(async (blob) => new Uint8Array(await blob.arrayBuffer()));
+                    jpeg.catch(() => {}); // reported when awaited; ignored after a cancel
                     pages.push({ jpeg, pixelWidth: page.canvas.width, pixelHeight: page.canvas.height, width: page.width, height: page.height });
                 }
             }
             if (!current.cancelled) {
                 progress.update(slides.length, slides.length, 'Writing the PDF...');
+                for (const page of pages) page.jpeg = await page.jpeg;
                 const title = win.document.title || (state.slides[0] && state.slides[0].title) || baseFileName();
                 pdf = buildPdf(pages, title);
             }

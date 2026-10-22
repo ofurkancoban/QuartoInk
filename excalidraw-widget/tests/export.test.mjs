@@ -212,6 +212,34 @@ describe('PDF and PNG export', () => {
         });
     });
 
+    it('renders the same with the compact style copy as with the full one', async () => {
+        // The patched renderer leaves out styles the copy computes by itself (scripts/renderer-patches.mjs).
+        await withDeck('talk.html', deckA, async ({ page }) => {
+            await page.evaluate(() => goToSlide(state.slides[1]));
+            await waitForSlide(page, 2);
+            await page.evaluate(() => window.QuartoInkExport.renderCurrentSlide({ annotations: false }));
+            const result = await page.evaluate(async () => {
+                const w = document.getElementById('content-frame').contentWindow;
+                const slide = w.Reveal.getCurrentSlide();
+                const pixels = async (compact) => {
+                    const c = await w.__qiHtmlToImage.toCanvas(slide, {
+                        pixelRatio: 1, fontEmbedCSS: '', backgroundColor: '#fff', qiCompactStyles: compact, qiRoot: slide,
+                    });
+                    return { data: c.getContext('2d').getImageData(0, 0, c.width, c.height).data, size: [c.width, c.height] };
+                };
+                const full = await pixels(false);
+                const compact = await pixels(true);
+                let differing = 0;
+                for (let i = 0; i < full.data.length; i++) if (full.data[i] !== compact.data[i]) differing++;
+                const svgLength = async (compact) => (await w.__qiHtmlToImage.toSvg(slide, { fontEmbedCSS: '', qiCompactStyles: compact, qiRoot: slide })).length;
+                return { sizes: [full.size, compact.size], differing, ratio: (await svgLength(true)) / (await svgLength(false)) };
+            });
+            assert.deepEqual(result.sizes[0], result.sizes[1]);
+            assert.equal(result.differing, 0, 'identical pixels');
+            assert.ok(result.ratio < 0.5, `compact copy is smaller (${result.ratio.toFixed(2)})`);
+        });
+    });
+
     it('shows all fragments and the slide background in the PDF', async () => {
         await withDeck('notes.html', deckB, async ({ page }) => {
             await page.evaluate(() => goToSlide(state.slides[4]));
