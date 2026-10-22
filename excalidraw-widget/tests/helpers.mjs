@@ -36,7 +36,9 @@ export function startServer() {
                 res.end();
                 return;
             }
-            res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream' });
+            // Decks run in sandboxed iframes (opaque origin): reveal.js assets need CORS, as from a CDN.
+            const cors = isReveal ? { 'Access-Control-Allow-Origin': '*' } : {};
+            res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', ...cors });
             res.end(body);
         });
     });
@@ -132,4 +134,28 @@ export function appInfo(page) {
             count,
         };
     });
+}
+
+/**
+ * The document of a deck iframe (default: the visible deck). Decks run sandboxed, so the app page
+ * cannot reach into them; tests evaluate code inside them through Playwright's frame instead.
+ */
+export async function deckFrame(page, selector = '#content-frame') {
+    const handle = await page.$(selector);
+    return handle && handle.contentFrame();
+}
+
+/**
+ * Click a tab of the visible deck (by CSS selector) the way a user does: on the app's tab proxy
+ * over it, once the proxies have followed the slide transition onto the tabs.
+ */
+export async function clickDeckTab(page, selector) {
+    let box = null;
+    for (let i = 0; i < 50; i++) {
+        box = await page.frameLocator('#content-frame').locator(selector).boundingBox();
+        const settled = box && await page.evaluate((b) => state.tabRects.some((r) => Math.abs(r.x - b.x) < 1 && Math.abs(r.y - b.y) < 1), box);
+        if (settled) break;
+        await page.waitForTimeout(100);
+    }
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 }

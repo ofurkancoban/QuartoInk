@@ -39,14 +39,14 @@ const CLONE_STYLE_FN = 'function cloneCSSStyle(nativeNode, clonedNode, options) 
 // style is none, so a solid border with width 0 would get the initial "medium" width instead.
 const HELPERS = `// --- Quarto Ink: compact style copy --------------------------------------------
 const qiDefaultStyles = new Map();
-let qiSandbox = null;
+let qiDefaultsRoot = null;
 const QI_SVG_NS = 'http://www.w3.org/2000/svg';
 const QI_CURRENT_COLOR = /^(border(-(top|right|bottom|left|block|inline)(-(start|end))?)?-color|outline-color|column-rule-color|rule-color|text-decoration-color)$/;
+const QI_ALWAYS_COPY = /^(border(-(top|right|bottom|left|block|inline)(-(start|end))?)?-width|outline-width|column-rule-width|rule-width)$/;
 function qiHasPxLength(value) {
     const lengths = value.match(/-?[\\d.]+px/g);
     return !!lengths && lengths.some((v) => parseFloat(v) !== 0);
 }
-const QI_ALWAYS_COPY = /^(border(-(top|right|bottom|left|block|inline)(-(start|end))?)?-width|outline-width|column-rule-width|rule-width)$/;
 function qiSkipProperty(name, value, defaults, parentStyle, ownStyle) {
     if (QI_ALWAYS_COPY.test(name)) return false;
     if (name.startsWith('--')) {
@@ -57,39 +57,39 @@ function qiSkipProperty(name, value, defaults, parentStyle, ownStyle) {
     }
     return value === defaults[name] && value === parentStyle.getPropertyValue(name) && !qiHasPxLength(value);
 }
-/** Computed style of a bare element of the same kind, in an empty standards-mode document. */
+/**
+ * Computed style of a bare element of the same kind, with only the browser's own styles: inside
+ * a shadow root (the page's stylesheets do not reach it) whose host resets inherited values.
+ * Not an empty iframe, which a sandboxed deck could not read (it gets an origin of its own).
+ */
 function qiDefaultStyle(node) {
     const ns = node.namespaceURI || '';
     const key = ns + ' ' + node.localName;
     let style = qiDefaultStyles.get(key);
     if (style) return style;
     const doc = node.ownerDocument;
-    if (!qiSandbox || !qiSandbox.isConnected) {
-        qiSandbox = doc.createElement('iframe');
-        qiSandbox.setAttribute('aria-hidden', 'true');
-        qiSandbox.style.cssText = 'position:fixed;left:-10000px;top:0;width:10px;height:10px;visibility:hidden;border:0';
+    if (!qiDefaultsRoot || !qiDefaultsRoot.host.isConnected) {
+        const host = doc.createElement('div');
+        host.setAttribute('aria-hidden', 'true');
+        host.style.cssText = 'all:initial;position:fixed;left:-10000px;top:0;width:10px;height:10px;visibility:hidden;contain:strict';
         // Next to <body>, so a rendered <body> never includes it.
-        doc.documentElement.appendChild(qiSandbox);
-        const sandboxDoc = qiSandbox.contentDocument;
-        sandboxDoc.open();
-        sandboxDoc.write('<!DOCTYPE html><html><head></head><body></body></html>');
-        sandboxDoc.close();
+        doc.documentElement.appendChild(host);
+        qiDefaultsRoot = host.attachShadow({ mode: 'open' });
         qiDefaultStyles.clear();
     }
-    const sandboxDoc = qiSandbox.contentDocument;
-    let parent = sandboxDoc.body;
+    let parent = qiDefaultsRoot;
     if (ns === QI_SVG_NS && node.localName !== 'svg') {
-        parent = sandboxDoc.createElementNS(QI_SVG_NS, 'svg');
-        sandboxDoc.body.appendChild(parent);
+        parent = doc.createElementNS(QI_SVG_NS, 'svg');
+        qiDefaultsRoot.appendChild(parent);
     }
     const el = ns && ns !== 'http://www.w3.org/1999/xhtml'
-        ? sandboxDoc.createElementNS(ns, node.localName)
-        : sandboxDoc.createElement(node.localName);
+        ? doc.createElementNS(ns, node.localName)
+        : doc.createElement(node.localName);
     parent.appendChild(el);
-    const computed = sandboxDoc.defaultView.getComputedStyle(el);
+    const computed = doc.defaultView.getComputedStyle(el);
     style = {};
     for (let i = 0; i < computed.length; i++) style[computed[i]] = computed.getPropertyValue(computed[i]);
-    if (parent !== sandboxDoc.body) parent.remove();
+    if (parent !== qiDefaultsRoot) parent.remove();
     else el.remove();
     qiDefaultStyles.set(key, style);
     return style;

@@ -3169,12 +3169,43 @@ h1, h2, h3 {
         if (window.QI_DEBUG) console.log.apply(console, arguments);
     }
 
-    // postMessage target origin for messages sent to the presentation iframe.
-    // Blob/srcdoc frames inherit the parent origin over http(s); under file:// the
-    // origin is opaque, so '*' is the only usable value there.
+    // Presentations run in sandboxed iframes without allow-same-origin: their scripts get an
+    // opaque origin and cannot reach this page (its stores, other decks). The host only talks
+    // to them through postMessage.
+    var QI_DECK_SANDBOX = 'allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-downloads allow-presentation';
+    document.querySelectorAll('#content-frame, #zoomple-lens-iframe').forEach(function (f) {
+        f.setAttribute('sandbox', QI_DECK_SANDBOX);
+        f.setAttribute('allow', 'fullscreen');
+    });
+
+    // postMessage target origin for messages sent to a presentation iframe: its origin is
+    // opaque, so '*' is the only value that reaches it. Nothing secret is ever sent there.
     function qiTargetOrigin() {
+        return '*';
+    }
+
+    // Origin the presentation bridge sends its messages to: this page only.
+    function qiHostOrigin() {
         return /^https?:$/.test(window.location.protocol) ? window.location.origin : '*';
     }
+
+    // First script of every presentation: storage and cookies throw in an opaque origin, which
+    // would break decks (and plugins) that use them, so they get an in-memory stand-in. And
+    // Reveal starts without writing the slide into the URL hash, which the sandbox blocks.
+    var QI_DECK_STORAGE_SHIM = '<script>(function(){'
+        + 'function mem(){var d=Object.create(null);return{getItem:function(k){k=String(k);return k in d?d[k]:null;},'
+        + 'setItem:function(k,v){d[String(k)]=String(v);},removeItem:function(k){delete d[String(k)];},'
+        + 'clear:function(){d=Object.create(null);},key:function(i){return Object.keys(d)[i]||null;},'
+        + 'get length(){return Object.keys(d).length;}};}'
+        + "['localStorage','sessionStorage'].forEach(function(n){try{window[n].getItem('qi');}catch(e){"
+        + 'try{Object.defineProperty(window,n,{value:mem(),configurable:true});}catch(_e){}}});'
+        + 'try{document.cookie;}catch(e){try{var c=\'\';Object.defineProperty(document,\'cookie\','
+        + '{get:function(){return c;},set:function(){},configurable:true});}catch(_e){}}'
+        + 'try{var r;Object.defineProperty(window,\'Reveal\',{configurable:true,enumerable:true,get:function(){return r;},'
+        + 'set:function(v){r=v;try{if(v&&typeof v.initialize===\'function\'&&!v.__qiInit){var init=v.initialize;'
+        + 'v.initialize=function(o){var c={},k;for(k in (o||{}))c[k]=o[k];c.hash=false;c.history=false;return init.call(this,c);};'
+        + 'v.__qiInit=true;}}catch(_e){}}});}catch(e){}'
+        + '})();<\/script>';
 
     // Escape text before inserting it into HTML templates.
     function qiEscapeHtml(value) {
@@ -4099,7 +4130,11 @@ const state = {
     bridgeAlive: false,
     currentSlide: '0-0',
     currentTabScope: '',
+    /** Fragment index shown on the current slide (from the bridge), null if none. */
+    currentFragment: null,
     tabRects: [],
+    /** Boxes of slide links / close buttons in deck viewport px (bridge LINK_RECTS). */
+    linkRects: [],
     rawTabRects: [],
     slideCount: 1,
     slides: [], // Full slide list from bridge
@@ -4190,30 +4225,6 @@ function fromNormalized(nx, ny) {
     return { x: nx * m.width + m.x, y: ny * m.height + m.y };
 }
 
-function resolveIframeTabTarget(el) {
-    if (!el || el.nodeType !== 1) return null;
-    if (el.matches && el.matches('[role="tab"]')) return el;
-    if (el.matches && el.matches('a[data-bs-toggle="tab"], button[data-bs-toggle="tab"]')) return el;
-    if (el.matches && el.matches('button.tabby-toggle, a.tabby-toggle, .tabby-toggle')) return el;
-    const liTabby = el.closest && el.closest('ul.panel-tabset-tabby > li');
-    if (liTabby) {
-        const ctrl = liTabby.querySelector(':scope > a[href], :scope > button[role="tab"], :scope > [role="tab"]');
-        if (ctrl) return ctrl;
-    }
-    const liNav = el.closest && el.closest('.nav-tabs > li, [role="tablist"] > li');
-    if (liNav) {
-        const ctrl = liNav.querySelector(':scope > a[href], :scope > button[role="tab"], :scope > [role="tab"]');
-        if (ctrl) return ctrl;
-    }
-    if (el.closest) {
-        const t = el.closest(
-            'ul.panel-tabset-tabby > li > a[href], ul.panel-tabset-tabby > li > button.tabby-toggle, [role="tablist"] a[href], [role="tablist"] button[role="tab"], .nav-tabs > li > a[href], .nav-tabs > li > button'
-        );
-        if (t) return t;
-    }
-    return null;
-}
-
 function tryPassClickToIframeTab(tabOrRect) {
     const f = state.ui.frame || _$('#content-frame');
     if (!f || !f.contentWindow) return;
@@ -4258,40 +4269,19 @@ function forwardIframeLinkPointerDown(clientX, clientY) {
     } catch (_e) {}
 }
 
+/**
+ * The slide link or close button under a pointer (client coords), from the boxes the bridge
+ * reports (LINK_RECTS): the sandboxed deck cannot be hit-tested from here.
+ */
 function resolveIframeInteractiveLinkAt(clientX, clientY) {
     const f = state.ui.frame || _$('#content-frame');
-    if (!f || !f.contentWindow) return null;
-    let doc;
-    try {
-        doc = f.contentWindow.document;
-    } catch (_e) {
-        return null;
-    }
+    if (!f || !Array.isArray(state.linkRects) || !state.linkRects.length) return null;
     const fr = f.getBoundingClientRect();
     const ix = clientX - fr.left;
     const iy = clientY - fr.top;
     if (!Number.isFinite(ix) || !Number.isFinite(iy)) return null;
     if (ix < -2 || iy < -2 || ix > fr.width + 2 || iy > fr.height + 2) return null;
-    let stack = [];
-    try {
-        stack = doc.elementsFromPoint(ix, iy) || [];
-    } catch (_e2) {
-        return null;
-    }
-    for (let i = 0; i < stack.length; i++) {
-        const node = stack[i];
-        if (!node || node.nodeType !== 1) continue;
-        if (resolveIframeTabTarget(node)) continue;
-        const closeBtn = node.closest && node.closest('.gclose, .glightbox-close, [aria-label="Close"], [aria-label="close"], .close, .close-button, .modal-close, [data-bs-dismiss="modal"], [data-dismiss="modal"]');
-        if (closeBtn) return closeBtn;
-        const link = node.closest && node.closest('a[href]');
-        if (!link) continue;
-        const href = (link.getAttribute('href') || '').trim();
-        if (!href || /^javascript:/i.test(href)) continue;
-        if (link.closest && link.closest('[contenteditable="true"]')) continue;
-        return link;
-    }
-    return null;
+    return state.linkRects.find((r) => ix >= r.left - 1 && ix <= r.left + r.width + 1 && iy >= r.top - 1 && iy <= r.top + r.height + 1) || null;
 }
 
 /** True if pointer is on ink canvas or Excalidraw drawing surface (not toolbar chrome / tab proxy). */
@@ -5445,142 +5435,12 @@ function extractSlidesFromHtml(content) {
     }
 }
 
-function syncPresentationStateFromFrame() {
-    try {
-        const targetWindow = frame && frame.contentWindow;
-        if (!targetWindow || !targetWindow.Reveal) return false;
 
-        const reveal = targetWindow.Reveal;
-        if (typeof reveal.isReady === 'function' && !reveal.isReady()) return false;
-        const indices = reveal.getIndices();
-        const slides = typeof reveal.getSlides === 'function'
-            ? Array.from(reveal.getSlides()).map((el, i) => {
-                const slideIndices = reveal.getIndices(el);
-                return {
-                    h: slideIndices.h,
-                    v: slideIndices.v || 0,
-                    title: getSlideTitle(el, i + 1),
-                    index: i + 1
-                };
-            })
-            : [];
 
-        state.currentSlide = `${indices.h}-${indices.v || 0}`;
-        if (typeof targetWindow.__annotatorGetActiveTabScope === 'function') {
-            setCurrentTabScope(targetWindow.__annotatorGetActiveTabScope());
-        }
-        if (slides.length > 0) {
-            state.slides = slides;
-            state.slideCount = slides.length;
-        }
-
-        const slideLabel = (typeof reveal.getSlidePastCount === 'function' ? reveal.getSlidePastCount() : 0) + 1;
-        _upd('slide-indicator', 'textContent', `Slide: ${slideLabel} / ${state.slideCount}`);
-        _upd('slide-indicator', 'display', 'inline', true);
-
-        redraw();
-        updateSidebar();
-        if (state.annotationEngine === 'excalidraw') {
-            ensureExcalidrawRuntime().then((ok) => { if (ok) syncAnnotationEngineMount(); });
-        }
-        return true;
-    } catch (err) {
-        window.log('Frame sync fallback failed: ' + err.message, 'warn');
-        return false;
-    }
-}
-
-function getFrameSlideElements() {
-    const targetWindow = frame && frame.contentWindow;
-    const doc = targetWindow && targetWindow.document;
-    if (!doc) return [];
-
-    const slidesRoot = doc.querySelector('.slides');
-    if (!slidesRoot) return [];
-
-    const slideElements = [];
-    const topLevelSlides = Array.from(slidesRoot.children).filter(el => el.tagName === 'SECTION');
-
-    topLevelSlides.forEach((section, h) => {
-        const verticalSlides = Array.from(section.children).filter(el => el.tagName === 'SECTION');
-        if (verticalSlides.length > 0) {
-            verticalSlides.forEach((child, v) => slideElements.push({ h, v, el: child, parent: section }));
-            return;
-        }
-
-        slideElements.push({ h, v: 0, el: section, parent: null });
-    });
-
-    return slideElements;
-}
-
-function applyDomSlideFallback(targetH, targetV) {
-    try {
-        const targetWindow = frame && frame.contentWindow;
-        const doc = targetWindow && targetWindow.document;
-        if (!doc) return false;
-
-        const slideElements = getFrameSlideElements();
-        if (slideElements.length === 0) return false;
-
-        slideElements.forEach(({ h, v, el, parent }) => {
-            const isActive = h === targetH && (v || 0) === (targetV || 0);
-            el.style.display = isActive ? 'block' : 'none';
-            el.style.visibility = isActive ? 'visible' : 'hidden';
-            el.classList.toggle('present', isActive);
-            el.classList.toggle('past', false);
-            el.classList.toggle('future', false);
-
-            if (parent) {
-                const parentActive = h === targetH;
-                parent.style.display = parentActive ? 'block' : 'none';
-                parent.style.visibility = parentActive ? 'visible' : 'hidden';
-            }
-        });
-
-        doc.body.scrollTop = 0;
-        doc.documentElement.scrollTop = 0;
-
-        state.currentSlide = `${targetH}-${targetV || 0}`;
-        setCurrentTabScope('');
-        const slideIndex = state.slides.findIndex(slide => slide.h === targetH && (slide.v || 0) === (targetV || 0));
-        const slideLabel = slideIndex >= 0 ? slideIndex + 1 : (targetH + 1);
-        _upd('slide-indicator', 'textContent', `Slide: ${slideLabel} / ${state.slideCount}`);
-        _upd('slide-indicator', 'display', 'inline', true);
-
-        updateSidebar();
-        handleResize();
-        redraw();
-        return true;
-    } catch (err) {
-        window.log('DOM slide fallback failed: ' + err.message, 'warn');
-        return false;
-    }
-}
 
 function goToSlide(slide) {
     if (!frame || !frame.contentWindow) return;
-
-    var didGo = false;
-
-    // Primary: direct Reveal.js API (fastest, same-origin only)
-    try {
-        if (frame.contentWindow.Reveal && frame.contentWindow.Reveal.isReady && frame.contentWindow.Reveal.isReady()) {
-            frame.contentWindow.Reveal.slide(slide.h, slide.v || 0);
-            didGo = true;
-        }
-    } catch (_e) {}
-
-    // Secondary: __annotatorGotoSlide bridge function
-    if (!didGo) {
-        try {
-            if (typeof frame.contentWindow.__annotatorGotoSlide === 'function') {
-                didGo = frame.contentWindow.__annotatorGotoSlide(slide.h, slide.v || 0);
-            }
-        } catch (_e) {}
-    }
-
-    // Tertiary: postMessage (works cross-origin, Blob URLs)
+    // The deck is sandboxed: the bridge inside it does the navigation.
     try { frame.contentWindow.postMessage({ type: 'GOTO', h: slide.h, v: slide.v || 0 }, qiTargetOrigin()); } catch (_e) {}
 }
 
@@ -5601,7 +5461,9 @@ function attachPresentationFrameListeners(f) {
         _upd('status-left', 'textContent', 'Presentation ready: ' + state.currentFileName);
         window.setTimeout(() => {
             if (f !== frame) return;
-            if (!state.bridgeAlive) syncPresentationStateFromFrame();
+            if (!state.bridgeAlive) {
+                try { f.contentWindow.postMessage({ type: 'RESYNC' }, qiTargetOrigin()); } catch (_e) {}
+            }
             // Ensure focus after load
             window.focus();
             if (f.contentWindow) f.contentWindow.focus();
@@ -5851,7 +5713,78 @@ window.processFileContent = function(content, file) {
                                 type: 'MODAL_STATE',
                                 open: isOpen
                             }, QI_PARENT_ORIGIN);
+                            // Lightboxes bring their own close buttons and links (also after their animation).
+                            setTimeout(sendLinkRects, 60);
+                            setTimeout(sendLinkRects, 450);
                         }
+                    }
+
+                    // In-deck links (#/slide-id, #/2/1, #ref-...): hash navigation is blocked in this
+                    // sandboxed blob document, so show the target slide with Reveal instead.
+                    function revealGotoHash(href) {
+                        try {
+                            if (!window.Reveal || typeof window.Reveal.slide !== 'function') return false;
+                            var target = decodeURIComponent(href.charAt(0) === '#' ? href.slice(1) : href);
+                            if (target.charAt(0) === '/') target = target.slice(1);
+                            if (!target) { window.Reveal.slide(0, 0); return true; }
+                            var parts = target.split('/');
+                            if (parts[0] !== '' && isFinite(Number(parts[0]))) {
+                                var f = parts.length > 2 && parts[2] !== '' ? Number(parts[2]) : undefined;
+                                window.Reveal.slide(Number(parts[0]), Number(parts[1] || 0), f);
+                                return true;
+                            }
+                            var el = document.getElementById(parts[0]);
+                            var section = el && el.closest('.slides section');
+                            if (!section) return false;
+                            var idx = window.Reveal.getIndices(section);
+                            window.Reveal.slide(idx.h, idx.v || 0);
+                            if (el !== section) { try { el.scrollIntoView({ block: 'nearest' }); } catch (_s) {} }
+                            return true;
+                        } catch (_e) { return false; }
+                    }
+                    document.addEventListener('click', function(e) {
+                        if (e.defaultPrevented || !e.target || !e.target.closest) return;
+                        var link = e.target.closest('a[href^="#"]');
+                        if (!link || link.getAttribute('href') === '#') return;
+                        // Tabs switch panes themselves.
+                        if (link.matches(TAB_PROXY_SELECTOR) || link.closest('[role="tablist"], .panel-tabset-tabby, .nav-tabs')) return;
+                        if (revealGotoHash(link.getAttribute('href'))) e.preventDefault();
+                    });
+
+                    // Links and close buttons the host passes clicks through to. The host cannot look
+                    // into this sandboxed document, so it gets their boxes (viewport px) instead.
+                    var LINK_SELECTOR = 'a[href], .gclose, .glightbox-close, [aria-label="Close"], [aria-label="close"], .close, .close-button, .modal-close, [data-bs-dismiss="modal"], [data-dismiss="modal"]';
+                    function buildLinkRects() {
+                        var out = [];
+                        try {
+                            var els = document.querySelectorAll(LINK_SELECTOR);
+                            for (var i = 0; i < els.length && out.length < 400; i++) {
+                                var el = els[i];
+                                if (el.closest('[role="tab"], button.tabby-toggle, a.tabby-toggle') || el.matches(TAB_PROXY_SELECTOR)) continue;
+                                if (el.closest('[contenteditable="true"]')) continue;
+                                if (el.tagName === 'A') {
+                                    var href = (el.getAttribute('href') || '').trim();
+                                    if (!href || href.toLowerCase().indexOf('javascript:') === 0) continue;
+                                }
+                                var rs = el.getClientRects();
+                                for (var j = 0; j < rs.length; j++) {
+                                    var r = rs[j];
+                                    if (r.width < 1 || r.height < 1) continue;
+                                    if (r.right < 0 || r.bottom < 0 || r.left > window.innerWidth || r.top > window.innerHeight) continue;
+                                    // Only what is shown there (not links of hidden slides); overlays such as a
+                                    // laser-pointer canvas may lie on top, as the click goes through them.
+                                    var stack = document.elementsFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+                                    var shown = false;
+                                    for (var k = 0; k < stack.length && !shown; k++) shown = stack[k] === el || el.contains(stack[k]);
+                                    if (!shown) continue;
+                                    out.push({ left: r.left, top: r.top, width: r.width, height: r.height });
+                                }
+                            }
+                        } catch (_e) {}
+                        return out;
+                    }
+                    function sendLinkRects() {
+                        window.parent.postMessage({ type: 'LINK_RECTS', rects: buildLinkRects() }, QI_PARENT_ORIGIN);
                     }
 
                     // Observe body class changes and DOM additions for modals
@@ -6099,6 +6032,7 @@ window.processFileContent = function(content, file) {
                         function sendTabRects() {
                             var rects = buildTabRects();
                             window.parent.postMessage({ type: 'TAB_RECTS', rects: rects }, QI_PARENT_ORIGIN);
+                            sendLinkRects();
                         }
 
                         const notify = (isInit) => {
@@ -6140,9 +6074,11 @@ window.processFileContent = function(content, file) {
                                     slides: isInit ? slideList : null,
                                     linear: (typeof window.Reveal.getSlidePastCount === 'function' ? window.Reveal.getSlidePastCount() : 0) + 1,
                                     tabScope: getActiveTabScope(),
-                                    tabRects: tabRectsPayload
+                                    tabRects: tabRectsPayload,
+                                    indexf: typeof idx.f === 'number' ? idx.f : null
                                 }, QI_PARENT_ORIGIN);
                                 window.parent.postMessage({ type: 'TAB_RECTS', rects: tabRectsPayload }, QI_PARENT_ORIGIN);
+                                sendLinkRects();
                             } catch(e) { try { window.parent.postMessage({type:'BRIDGE_LOG', msg:'Bridge Notification Error: ' + e.message}, QI_PARENT_ORIGIN); } catch(_e) {} }
                         };
                         
@@ -6190,6 +6126,16 @@ window.processFileContent = function(content, file) {
                         window.Reveal.on('slidechanged', () => notify(false));
                         window.Reveal.on('slidetransitionend', () => notify(false));
                         window.Reveal.on('ready', () => notify(true));
+                        // The deck is sandboxed: writing the slide into its blob URL's hash is blocked
+                        // (and logged on every slide change), so Reveal keeps it to itself.
+                        try { window.Reveal.configure({ hash: false, history: false }); } catch (_e) {}
+                        var sendFragment = function() {
+                            var fi = window.Reveal.getIndices().f;
+                            window.parent.postMessage({ type: 'FRAGMENT_CHANGED', indexf: typeof fi === 'number' ? fi : null }, QI_PARENT_ORIGIN);
+                            sendLinkRects();
+                        };
+                        window.Reveal.on('fragmentshown', sendFragment);
+                        window.Reveal.on('fragmenthidden', sendFragment);
 
                         // Global click listener for tab-like elements to catch transitions
                         // that might not trigger standard events or expected attribute changes.
@@ -6294,7 +6240,8 @@ window.processFileContent = function(content, file) {
                                 var _gotoDone = false;
                                 try {
                                     if (window.Reveal && typeof window.Reveal.slide === 'function' && (!window.Reveal.isReady || window.Reveal.isReady())) {
-                                        window.Reveal.slide(e.data.h, e.data.v || 0);
+                                        if (typeof e.data.f === 'number') window.Reveal.slide(e.data.h, e.data.v || 0, e.data.f);
+                                        else window.Reveal.slide(e.data.h, e.data.v || 0);
                                         _gotoDone = true;
                                     }
                                 } catch(_e) {}
@@ -6444,6 +6391,32 @@ window.processFileContent = function(content, file) {
                             if (e.data.type === 'RESYNC') {
                                 if (typeof window.__annotatorResync === 'function') window.__annotatorResync();
                             }
+                            // PDF/PNG export: the host sends its agent (and the slide renderer) and calls it.
+                            if (e.data.type === 'QI_AGENT_LOAD' && typeof e.data.source === 'string') {
+                                if (!window.__qiExportAgent) {
+                                    var agentScript = document.createElement('script');
+                                    agentScript.textContent = e.data.source;
+                                    (document.head || document.documentElement).appendChild(agentScript);
+                                    agentScript.remove();
+                                }
+                                window.parent.postMessage({ type: 'QI_AGENT_READY', ok: !!window.__qiExportAgent }, QI_PARENT_ORIGIN);
+                            }
+                            if (e.data.type === 'QI_AGENT_CALL') {
+                                var callId = e.data.id;
+                                var agent = window.__qiExportAgent;
+                                var method = String(e.data.method || '');
+                                Promise.resolve().then(function() {
+                                    if (!agent || !Object.prototype.hasOwnProperty.call(agent, method) || typeof agent[method] !== 'function') {
+                                        throw new Error('Unknown export call: ' + method);
+                                    }
+                                    return agent[method].apply(agent, Array.isArray(e.data.args) ? e.data.args : []);
+                                }).then(function(result) {
+                                    var transfer = result && result.bitmap ? [result.bitmap] : [];
+                                    window.parent.postMessage({ type: 'QI_AGENT_RESULT', id: callId, ok: true, result: result }, QI_PARENT_ORIGIN, transfer);
+                                }, function(err) {
+                                    window.parent.postMessage({ type: 'QI_AGENT_RESULT', id: callId, ok: false, error: String((err && err.message) || err) }, QI_PARENT_ORIGIN);
+                                });
+                            }
                             if (e.data.type === 'PING') {
                                 window.parent.postMessage({ 
                                     type: 'PONG', 
@@ -6490,13 +6463,14 @@ window.processFileContent = function(content, file) {
         : '';
     const baseTag = fileBasePath ? `<base href="file://${fileBasePath.replace(/ /g, '%20')}">` : '';
     
-    // 2. Case-insensitive Body Detection
-    const contentWithBase = content.includes('<base ') || !baseTag
-        ? content
-        : content.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`);
+    // 2. Storage stand-in first, then the <base> for relative assets
+    const headInsert = QI_DECK_STORAGE_SHIM + (content.includes('<base ') ? '' : baseTag);
+    const contentWithBase = /<head[^>]*>/i.test(content)
+        ? content.replace(/<head([^>]*)>/i, (_m, attrs) => `<head${attrs}>${headInsert}`)
+        : headInsert + content;
 
     const sourceForInjection = contentWithBase;
-    const bridgeForFrame = bridgeScript.replace('__QI_PARENT_ORIGIN__', qiTargetOrigin());
+    const bridgeForFrame = bridgeScript.replace('__QI_PARENT_ORIGIN__', qiHostOrigin());
     let lastBody = sourceForInjection.toLowerCase().lastIndexOf('</body>');
     const modified = lastBody !== -1
         ? sourceForInjection.substring(0, lastBody) + bridgeForFrame + sourceForInjection.substring(lastBody)
@@ -6704,6 +6678,13 @@ function updateTabProxyLayer() {
     });
 }
 
+// The lens deck's bridge reports when it is ready: show the current slide in it then.
+window.addEventListener('message', (e) => {
+    const lens = _$('#zoomple-lens-iframe');
+    if (!lens || e.source !== lens.contentWindow || !e.data) return;
+    if (e.data.type === 'INIT_STATE' || e.data.type === 'BRIDGE_READY_FOR_FOCUS') zoompleSyncLens(true);
+});
+
 window.addEventListener('message', e => {
     // Accept messages only from the presentation iframe, not from any other window.
     const presentationFrame = state.ui.frame || _$('#content-frame');
@@ -6783,6 +6764,14 @@ window.addEventListener('message', e => {
         state.rawTabRects = Array.isArray(e.data.rects) ? e.data.rects : [];
         state.tabRects = mapTabRectsFromBridge(state.rawTabRects);
         updateTabProxyLayer();
+        return;
+    }
+    if (e.data.type === 'LINK_RECTS') {
+        state.linkRects = Array.isArray(e.data.rects) ? e.data.rects : [];
+        return;
+    }
+    if (e.data.type === 'FRAGMENT_CHANGED') {
+        state.currentFragment = typeof e.data.indexf === 'number' ? e.data.indexf : null;
         return;
     }
     if (e.data.type === 'SLIDE_CHANGED' || e.data.type === 'INIT_STATE') {
@@ -6927,6 +6916,7 @@ function applyTabChangeMessage(data) {
 /** Slide / Quarto-tab change reported by the bridge (SLIDE_CHANGED or INIT_STATE). */
 function applySlideChangeMessage(data) {
     clearTimeout(state._bridgeNavTimer);
+    if ('indexf' in data) state.currentFragment = typeof data.indexf === 'number' ? data.indexf : null;
     qiDebug('[Parent] Received', data.type, 'h:', data.indexh, 'v:', data.indexv, 'engine:', state.annotationEngine, 'drawingMode:', state.isDrawingMode, 'currentSlide:', state.currentSlide);
     if (Array.isArray(data.tabRects)) {
         state.rawTabRects = data.tabRects;
@@ -6983,53 +6973,6 @@ function applySlideChangeMessage(data) {
     updateBridgeStatus(data.title || 'Reveal.js');
 }
 
-function fallbackNavigateSlide(dir) {
-    try {
-        const targetWindow = frame && frame.contentWindow;
-        if (!targetWindow) return false;
-
-        if (targetWindow.Reveal) {
-            if (dir === 'Next' && typeof targetWindow.Reveal.next === 'function') {
-                targetWindow.Reveal.next();
-                return true;
-            }
-            if (dir === 'Prev' && typeof targetWindow.Reveal.prev === 'function') {
-                targetWindow.Reveal.prev();
-                return true;
-            }
-        }
-
-        if (state.slides.length > 0 && targetWindow.location) {
-            const currentIndex = state.slides.findIndex(slide => `${slide.h}-${slide.v}` === state.currentSlide);
-            const fallbackIndex = currentIndex === -1 ? 0 : currentIndex + (dir === 'Next' ? 1 : -1);
-            const targetSlide = state.slides[fallbackIndex];
-            if (targetSlide) {
-                targetWindow.location.hash = `#/${targetSlide.h}/${targetSlide.v || 0}`;
-                return true;
-            }
-        }
-
-        const key = dir === 'Next' ? 'ArrowRight' : 'ArrowLeft';
-        const keyCode = dir === 'Next' ? 39 : 37;
-        const keyboardEvent = new KeyboardEvent('keydown', {
-            key,
-            code: key,
-            keyCode,
-            which: keyCode,
-            bubbles: true
-        });
-
-        if (targetWindow.document && targetWindow.document.dispatchEvent(keyboardEvent)) {
-            return true;
-        }
-
-        targetWindow.dispatchEvent(keyboardEvent);
-        return true;
-    } catch (err) {
-        window.log('Fallback navigation failed: ' + err.message, 'warn');
-        return false;
-    }
-}
 
 function tryNavigateFromSwipe(dx, dy, dt) {
     const minD = 40;
@@ -7217,44 +7160,8 @@ function navigateSlide(dir) {
         return;
     }
 
-    var didNavigate = false;
-
-    // Layer 1: Direct Reveal.js API (fastest, same-origin only)
-    try {
-        var cw = f.contentWindow;
-        if (cw.Reveal && cw.Reveal.isReady && cw.Reveal.isReady()) {
-            if (dir === 'Next' && typeof cw.Reveal.next === 'function') { cw.Reveal.next(); didNavigate = true; }
-            else if (dir === 'Prev' && typeof cw.Reveal.prev === 'function') { cw.Reveal.prev(); didNavigate = true; }
-        }
-    } catch (_e) {}
-
-    // Layer 2: Direct __annotatorNavigate (bridge function, same-origin only)
-    if (!didNavigate) {
-        try {
-            if (typeof f.contentWindow.__annotatorNavigate === 'function') {
-                didNavigate = f.contentWindow.__annotatorNavigate(dir);
-            }
-        } catch (_e) {}
-    }
-
-    // Layer 3: postMessage (works cross-origin, Blob URLs)
-    if (!didNavigate) {
-        try { f.contentWindow.postMessage({ type: 'NAVIGATE', key: dir }, qiTargetOrigin()); } catch (_e) {}
-    }
-
-    // Layer 4: GOTO with computed next/prev slide index
-    if (!didNavigate && state.slides.length > 0) {
-        var curIdx = state.slides.findIndex(function(s) { return s.h + '-' + s.v === state.currentSlide; });
-        if (curIdx === -1) curIdx = 0;
-        var nextIdx = dir === 'Next' ? curIdx + 1 : curIdx - 1;
-        var target = state.slides[nextIdx];
-        if (target) {
-            try { f.contentWindow.postMessage({ type: 'GOTO', h: target.h, v: target.v || 0 }, qiTargetOrigin()); } catch (_e) {}
-            try {
-                if (f.contentWindow.__annotatorGotoSlide) f.contentWindow.__annotatorGotoSlide(target.h, target.v || 0);
-            } catch (_e) {}
-        }
-    }
+    // The deck is sandboxed: the bridge inside it navigates (fragments included).
+    try { f.contentWindow.postMessage({ type: 'NAVIGATE', key: dir }, qiTargetOrigin()); } catch (_e) {}
 }
 window.navigateSlide = navigateSlide;
 
@@ -7585,9 +7492,31 @@ const ZOOMPLE = {
     LENS_SIZE: 250,
     active: false,
     iframeSrc: null,
+    syncedKey: null,
     _moveHandler: null,
     _raf: null
 };
+
+/**
+ * Show the current slide, fragment and tabs in the lens. The lens is a second copy of the
+ * sandboxed deck, so it is driven through its bridge like the main one. `force` resends even
+ * if nothing changed (the lens may have just loaded).
+ */
+function zoompleSyncLens(force) {
+    const lensIframe = _$('#zoomple-lens-iframe');
+    if (!lensIframe || !lensIframe.contentWindow) return;
+    const scope = state.currentTabScope || '';
+    const key = `${state.currentSlide}|${state.currentFragment}|${scope}`;
+    if (!force && ZOOMPLE.syncedKey === key) return;
+    ZOOMPLE.syncedKey = key;
+    const [h, v] = String(state.currentSlide || '0-0').split('-').map((n) => parseInt(n, 10) || 0);
+    const goto = { type: 'GOTO', h, v };
+    if (typeof state.currentFragment === 'number') goto.f = state.currentFragment;
+    try {
+        lensIframe.contentWindow.postMessage(goto, qiTargetOrigin());
+        if (scope) lensIframe.contentWindow.postMessage({ type: 'ACTIVATE_TAB_SCOPE', scope }, qiTargetOrigin());
+    } catch (_e) {}
+}
 
 function zoompleRenderCanvas() {
     if (!ZOOMPLE.active) {
@@ -7595,43 +7524,7 @@ function zoompleRenderCanvas() {
         return;
     }
 
-    // Sync tab states from src to lens (supports Bootstrap and Quarto Tabby)
-    try {
-        const srcDoc = _$('#content-frame').contentDocument;
-        const lensDoc = _$('#zoomple-lens-iframe').contentDocument;
-        if (srcDoc && lensDoc) {
-            const roles = ['tab', 'tabpanel'];
-            roles.forEach(role => {
-                const srcEls = srcDoc.querySelectorAll(`[role="${role}"]`);
-                const lensEls = lensDoc.querySelectorAll(`[role="${role}"]`);
-                for (let i = 0; i < srcEls.length; i++) {
-                    if (lensEls[i]) {
-                        // Sync Quarto Tabby attributes only if changed
-                        const attrsToSync = ['aria-selected', 'aria-hidden', 'aria-expanded'];
-                        attrsToSync.forEach(attr => {
-                            const val = srcEls[i].getAttribute(attr);
-                            const currentVal = lensEls[i].getAttribute(attr);
-                            if (val !== currentVal) {
-                                if (val !== null) lensEls[i].setAttribute(attr, val);
-                                else lensEls[i].removeAttribute(attr);
-                            }
-                        });
-                        
-                        const hasHidden = srcEls[i].hasAttribute('hidden');
-                        if (hasHidden !== lensEls[i].hasAttribute('hidden')) {
-                            if (hasHidden) lensEls[i].setAttribute('hidden', '');
-                            else lensEls[i].removeAttribute('hidden');
-                        }
-                        
-                        // Sync class names only if changed
-                        if (lensEls[i].className !== srcEls[i].className) {
-                            lensEls[i].className = srcEls[i].className;
-                        }
-                    }
-                }
-            });
-        }
-    } catch(e) {}
+    zoompleSyncLens(false);
 
     const lensCanvas = _$('#zoomple-lens-canvas');
     if (lensCanvas) {
@@ -7658,25 +7551,14 @@ function zoompleShow(clientX, clientY) {
 
     ZOOMPLE.active = true;
 
-    // Clone the iframe source so the lens shows the same slide
-    let currentSrc = srcIframe.src || srcIframe.getAttribute('src') || '';
-    let slideHash = '';
-    try {
-        slideHash = srcIframe.contentWindow.location.hash || '';
-    } catch(e) {}
-    
-    let baseSrc = currentSrc.split('#')[0];
-    let newSrc = baseSrc + slideHash;
-
+    // The lens loads the same deck once, then follows the slide through messages.
+    const newSrc = (srcIframe.src || srcIframe.getAttribute('src') || '').split('#')[0];
     if (newSrc && ZOOMPLE.iframeSrc !== newSrc) {
         ZOOMPLE.iframeSrc = newSrc;
+        ZOOMPLE.syncedKey = null;
         lensIframe.src = newSrc;
     } else {
-        try {
-            if (lensIframe.contentWindow && lensIframe.contentWindow.location.hash !== slideHash) {
-                lensIframe.contentWindow.location.hash = slideHash;
-            }
-        } catch(e) {}
+        zoompleSyncLens(true);
     }
 
     const srcRect = srcIframe.getBoundingClientRect();

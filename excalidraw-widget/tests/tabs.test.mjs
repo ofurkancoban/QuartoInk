@@ -1,7 +1,7 @@
 // Several presentations in tabs: separate ink, instant switching, memory limit.
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startServer, fixture, launch, openApp, waitForDeck, waitForSlide, openDecks, drawStroke, appInfo } from './helpers.mjs';
+import { startServer, fixture, launch, openApp, waitForDeck, waitForSlide, openDecks, drawStroke, appInfo, deckFrame, clickDeckTab } from './helpers.mjs';
 
 describe('Presentation tabs', () => {
     let server;
@@ -42,7 +42,9 @@ describe('Presentation tabs', () => {
             await drawStroke(page, 0.5);
 
             // Mark a's iframe: an instant switch must show the same, not reloaded, document.
-            await page.evaluate(() => document.querySelectorAll('#editor-stage iframe.qi-parked-frame').forEach((f) => { f.contentWindow.__qiMark = true; }));
+            for (const parked of await page.$$('#editor-stage iframe.qi-parked-frame')) {
+                await (await parked.contentFrame()).evaluate(() => { window.__qiMark = true; });
+            }
             const started = Date.now();
             await clickTab(page, 1);
             await page.waitForFunction(() => state.currentFileName === 'a.html'
@@ -50,7 +52,7 @@ describe('Presentation tabs', () => {
                 && !!window.QuartoInkExcalidraw.getAPI());
             const elapsed = Date.now() - started;
             assert.ok(elapsed < 1500, `switch took ${elapsed} ms`);
-            assert.equal(await page.evaluate(() => !!document.getElementById('content-frame').contentWindow.__qiMark), true);
+            assert.equal(await (await deckFrame(page)).evaluate(() => !!window.__qiMark), true);
             await page.waitForTimeout(600);
             info = await appInfo(page);
             assert.equal(info.elements['0-0'].length, 1, 'a keeps its stroke');
@@ -128,8 +130,7 @@ describe('Presentation tabs', () => {
             await page.evaluate(() => goToSlide(state.slides[1]));
             await waitForSlide(page, 2);
             // Click where the tab is on screen: the app's tab proxy layer forwards it to the deck.
-            const tabBox = await page.frameLocator('#content-frame').locator('#t2').boundingBox();
-            await page.mouse.click(tabBox.x + tabBox.width / 2, tabBox.y + tabBox.height / 2);
+            await clickDeckTab(page, '#t2');
             await page.waitForFunction(() => state.currentTabScope === '#p2');
 
             for (const n of [2, 3, 4, 5]) {

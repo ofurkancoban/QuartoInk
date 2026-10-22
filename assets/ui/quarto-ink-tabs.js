@@ -141,6 +141,9 @@
     function createFrame() {
         const f = document.createElement('iframe');
         f.title = 'Presentation Viewer';
+        // Same isolation as the first frame (QI_DECK_SANDBOX in index.html).
+        f.setAttribute('sandbox', QI_DECK_SANDBOX);
+        f.setAttribute('allow', 'fullscreen');
         const stage = document.getElementById('editor-stage');
         const overlay = document.getElementById('canvas-overlay');
         if (stage) stage.insertBefore(f, overlay || stage.firstChild);

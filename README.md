@@ -81,18 +81,18 @@ Simply open `index.html` in any modern browser. You will be greeted by the **Dro
 - Or use the "Open Presentation" button to browse for `.html` / `.htm` files.
 
 ### 2. Annotation
-Once loaded, your presentation sits securely in an iframe. 
+Once loaded, your presentation runs in a sandboxed iframe: its scripts cannot reach Quarto Ink or your stored annotations.
 - Use **Drawing Mode** (Canvas Overlay) to sketch.
 - Use **Navigation Mode** to interact with links or advance fragments.
 - **Pro Tip**: Use the `Space` bar to toggle between modes instantly.
 
 ### 3. Distribution
 Capture your brilliance using the **Export** menu:
-- **PDF with ink**: every slide in order, with your annotations. Fragments are shown in full, and a slide with ink on several Quarto tabs gets one page per inked tab.
+- **PDF with ink**: every slide in order, with your annotations. Fragments are shown in full, and a slide with Quarto tabs gets one page per tab. Under "Tabs in the PDF" you can instead keep only the tabs with ink, or only the tab each slide shows.
 - **PDF without ink**: the same pages without annotations, e.g. as a clean handout.
 - **Current slide as PNG**: the slide you are on, exactly as shown, with its ink.
 
-Slides are rendered at twice their native size, independent of your window size, with the deck's own fonts and backgrounds. Everything happens in the browser; nothing is uploaded.
+Slides are rendered at twice their native size, independent of your window size, with the deck's own fonts and backgrounds. The text of every PDF page stays selectable and searchable. Everything happens in the browser; nothing is uploaded.
 
 ---
 
@@ -133,7 +133,8 @@ CI runs the same checks and tests, and fails if the committed `dist/` or `index.
 ## 🛡️ Technical Architecture
 
 - **Engine**: Vanilla JS (ES6+) host app, with the Excalidraw text/shape tools bundled from `excalidraw-widget/` (React + Vite).
-- **UI layer**: `assets/ui/` holds the interface styles (`quarto-ink-ui.css`), the embedded display font (`fonts.css`) and small UI behaviours such as the slide ruler (`quarto-ink-ui.js`). `quarto-ink-export.js` renders slides for the PDF/PNG export with [html-to-image](https://github.com/bubkoo/html-to-image) (MIT, vendored in `excalidraw-widget/dist/vendor/`) and writes the PDF itself.
+- **UI layer**: `assets/ui/` holds the interface styles (`quarto-ink-ui.css`), the embedded display font (`fonts.css`) and small UI behaviours such as the slide ruler (`quarto-ink-ui.js`). `quarto-ink-export.js` runs the PDF/PNG export and writes the PDF itself; the slides are rendered inside the deck by `quarto-ink-export-agent.js` with [html-to-image](https://github.com/bubkoo/html-to-image) (MIT, built with small patches into `excalidraw-widget/dist/vendor/`).
+- **Isolation**: decks run in iframes sandboxed without `allow-same-origin`. The host and the deck talk only through `postMessage` (a bridge script injected into the deck), and the deck gets in-memory stand-ins for storage and cookies.
 - **State Management**: `Map`-based annotation storage with `slide::tab` indexing.
 - **Performance**: Double-buffered canvas drawing with `requestAnimationFrame` for artifact-free rendering.
 - **Persistence**: annotations, open decks and the tab session are stored locally in IndexedDB (older `localStorage` data is migrated automatically), so you can close the browser and resume anytime.

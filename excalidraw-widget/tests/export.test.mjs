@@ -2,7 +2,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
-import { startServer, fixture, launch, openApp, waitForDeck, waitForSlide, openDecks, drawStroke } from './helpers.mjs';
+import { startServer, fixture, launch, openApp, waitForDeck, waitForSlide, openDecks, drawStroke, deckFrame, clickDeckTab } from './helpers.mjs';
 
 /** Choose an entry of the export menu and return the downloaded file. */
 async function exportVia(page, itemId) {
@@ -56,11 +56,6 @@ function imageStats(page, dataUrl) {
 const jpegUrl = (bytes) => `data:image/jpeg;base64,${Buffer.from(bytes).toString('base64')}`;
 
 /** Click a Quarto tab inside the deck where it is on screen (the app's tab proxy forwards it). */
-async function clickDeckTab(page, selector) {
-    const box = await page.frameLocator('#content-frame').locator(selector).boundingBox();
-    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-}
-
 describe('PDF and PNG export', () => {
     let server;
     let browser;
@@ -109,17 +104,21 @@ describe('PDF and PNG export', () => {
 
     it('renders slide text where the screen shows it', async () => {
         await withDeck('talk.html', deckA, async ({ page }) => {
-            const box = await page.evaluate(() => {
-                const f = document.getElementById('content-frame');
-                const fr = f.getBoundingClientRect();
-                const b = f.contentWindow.Reveal.getSlidesElement().getBoundingClientRect();
-                return { x: fr.left + b.left, y: fr.top + b.top, width: b.width, height: b.height };
+            const deck = await deckFrame(page);
+            const fr = await page.evaluate(() => {
+                const r = document.getElementById('content-frame').getBoundingClientRect();
+                return { left: r.left, top: r.top };
             });
+            const b = await deck.evaluate(() => {
+                const r = window.Reveal.getSlidesElement().getBoundingClientRect();
+                return { left: r.left, top: r.top, width: r.width, height: r.height };
+            });
+            const box = { x: fr.left + b.left, y: fr.top + b.top, width: b.width, height: b.height };
             const shot = `data:image/png;base64,${(await page.screenshot({ clip: box })).toString('base64')}`;
             const exported = await page.evaluate(async () =>
                 (await window.QuartoInkExport.renderCurrentSlide({ annotations: false })).toDataURL('image/png'));
             // The page keeps the deck's margin: Reveal scales the slide by (1 - margin) and centres it.
-            const margin = await page.evaluate(() => document.getElementById('content-frame').contentWindow.Reveal.getConfig().margin);
+            const margin = await deck.evaluate(() => window.Reveal.getConfig().margin);
             const fit = 1 - margin;
             const top = (700 * margin) / 2;
             // Vertical extent of the text lines, in slide pixels. Embedded web fonts keep them in place.
@@ -235,9 +234,10 @@ describe('PDF and PNG export', () => {
         await withDeck('talk.html', deckA, async ({ page }) => {
             await page.evaluate(() => goToSlide(state.slides[1]));
             await waitForSlide(page, 2);
+            // Loads the renderer into the deck.
             await page.evaluate(() => window.QuartoInkExport.renderCurrentSlide({ annotations: false }));
-            const result = await page.evaluate(async () => {
-                const w = document.getElementById('content-frame').contentWindow;
+            const result = await (await deckFrame(page)).evaluate(async () => {
+                const w = window;
                 const slide = w.Reveal.getCurrentSlide();
                 const pixels = async (compact) => {
                     const c = await w.__qiHtmlToImage.toCanvas(slide, {
