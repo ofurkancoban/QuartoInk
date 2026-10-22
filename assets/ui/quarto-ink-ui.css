@@ -1,0 +1,1905 @@
+/* ==========================================================================
+   Quarto Ink "Atelier" UI layer
+   Paper and ink: the interface itself looks annotated (hand-drawn circle on
+   the active tool, ink-drop colour swatches, index-card slide navigator,
+   ruler-style slide scrubber, stamp-style mode badge).
+
+   Loaded after the base styles in index.html. It restyles existing elements
+   and keeps every id, class and data attribute the app logic depends on.
+   Layout-critical rules (pointer-events, dock flex directions, Excalidraw
+   panel geometry) are intentionally left to the base stylesheet.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. Tokens
+   -------------------------------------------------------------------------- */
+:root {
+    --qi-font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --qi-font-display: 'Instrument Serif', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+    --qi-font-hand: 'Virgil', 'Segoe Print', 'Bradley Hand', cursive;
+    --qi-font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+    --qi-radius-btn: 11px;
+    --qi-radius-panel: 18px;
+    --qi-gap: 10px;
+    --qi-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --qi-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+    /* Hand-drawn shapes used as masks so they can take any colour. */
+    --qi-scribble-ring: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='none' stroke='black' stroke-width='4.5' stroke-linecap='round'%3E%3Cpath d='M74 13C54 3 24 8 12 29 0 51 10 84 43 91c30 6 53-9 50-38C91 27 69 9 41 12'/%3E%3C/svg%3E");
+    --qi-squiggle-v: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 40' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round'%3E%3Cpath d='M4 2c3 4-3 8 0 12s3 8 0 12-3 8 0 12'/%3E%3C/svg%3E");
+    --qi-squiggle-h: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 8' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round'%3E%3Cpath d='M2 4c4-3 8 3 12 0s8-3 12 0 8 3 12 0'/%3E%3C/svg%3E");
+}
+
+/* Paper (light) */
+body[data-theme="light"] {
+    --bg: #ece7dc;
+    --surface: #fcfaf5;
+    --surface-elevated: #f3eee4;
+    --surface-glass: rgba(252, 250, 245, 0.86);
+    --surface-glass-strong: rgba(252, 250, 245, 0.97);
+    --accent: #df4a1f;
+    --accent-hover: #c73c14;
+    --accent-glow: rgba(223, 74, 31, 0.28);
+    --accent-subtle: rgba(223, 74, 31, 0.09);
+    --accent-muted: #c94a22;
+    --accent-contrast: #ffffff;
+    --success: #23795a;
+    --success-glow: rgba(35, 121, 90, 0.22);
+    --danger: #c8321e;
+    --text: #1d1b17;
+    --text-secondary: #3b3832;
+    --text-muted: #6c675c;
+    --text-dim: #8d877a;
+    --text-ghost: #b7b0a1;
+    --border: rgba(29, 27, 23, 0.11);
+    --border-hover: rgba(29, 27, 23, 0.22);
+    --border-active: rgba(223, 74, 31, 0.45);
+    --divider: rgba(29, 27, 23, 0.14);
+    --hover-bg: rgba(29, 27, 23, 0.055);
+    --active-bg: rgba(29, 27, 23, 0.09);
+    --kbd-bg: #fffdf8;
+    --overlay-bg: rgba(40, 34, 24, 0.38);
+    --selection-bg: rgba(223, 74, 31, 0.22);
+    --editor-chrome-bg: #e3ddd0;
+    --scrollbar-thumb: rgba(29, 27, 23, 0.16);
+    --scrollbar-thumb-hover: rgba(29, 27, 23, 0.28);
+
+    --qi-ink: #1d1b17;
+    --qi-paper: #fcfaf5;
+    --qi-line: rgba(29, 27, 23, 0.16);
+    --qi-line-strong: rgba(29, 27, 23, 0.85);
+    --qi-hard-shadow: rgba(29, 27, 23, 0.9);
+    --qi-dot: rgba(29, 27, 23, 0.13);
+    --qi-mat-line: rgba(29, 27, 23, 0.07);
+    --qi-shadow-card: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 18px 40px -22px rgba(60, 45, 20, 0.45), 0 2px 6px -2px rgba(60, 45, 20, 0.12);
+    --qi-tape: rgba(223, 74, 31, 0.32);
+    --qi-highlight: rgba(255, 205, 40, 0.6);
+    --qi-navigate: #23795a;
+}
+
+/* Midnight ink (dark) */
+body[data-theme="dark"] {
+    --bg: #0f1012;
+    --surface: #18191c;
+    --surface-elevated: #212226;
+    --surface-glass: rgba(24, 25, 28, 0.86);
+    --surface-glass-strong: rgba(24, 25, 28, 0.97);
+    --accent: #ff6a3d;
+    --accent-hover: #ff8a64;
+    --accent-glow: rgba(255, 106, 61, 0.3);
+    --accent-subtle: rgba(255, 106, 61, 0.11);
+    --accent-muted: #ff8a64;
+    --accent-contrast: #140c08;
+    --success: #4fd1a1;
+    --success-glow: rgba(79, 209, 161, 0.22);
+    --danger: #ff5f4a;
+    --text: #efede7;
+    --text-secondary: #cfccc3;
+    --text-muted: #9c988d;
+    --text-dim: #77746b;
+    --text-ghost: #4d4b45;
+    --border: rgba(255, 255, 255, 0.075);
+    --border-hover: rgba(255, 255, 255, 0.16);
+    --border-active: rgba(255, 106, 61, 0.5);
+    --divider: rgba(255, 255, 255, 0.12);
+    --hover-bg: rgba(255, 255, 255, 0.06);
+    --active-bg: rgba(255, 255, 255, 0.1);
+    --kbd-bg: #222327;
+    --overlay-bg: rgba(0, 0, 0, 0.6);
+    --selection-bg: rgba(255, 106, 61, 0.3);
+    --editor-chrome-bg: #0b0c0d;
+    --scrollbar-thumb: rgba(255, 255, 255, 0.1);
+    --scrollbar-thumb-hover: rgba(255, 255, 255, 0.18);
+
+    --qi-ink: #efede7;
+    --qi-paper: #18191c;
+    --qi-line: rgba(255, 255, 255, 0.11);
+    --qi-line-strong: rgba(255, 255, 255, 0.7);
+    --qi-hard-shadow: rgba(0, 0, 0, 0.85);
+    --qi-dot: rgba(255, 255, 255, 0.07);
+    --qi-mat-line: rgba(255, 255, 255, 0.035);
+    --qi-shadow-card: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 22px 50px -24px rgba(0, 0, 0, 0.9), 0 2px 8px -2px rgba(0, 0, 0, 0.5);
+    --qi-tape: rgba(255, 106, 61, 0.35);
+    --qi-highlight: rgba(255, 205, 40, 0.5);
+    --qi-navigate: #4fd1a1;
+}
+
+/* --------------------------------------------------------------------------
+   2. Base
+   -------------------------------------------------------------------------- */
+body {
+    font-family: var(--qi-font-ui);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+::selection { background: var(--selection-bg); }
+
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* Dotted paper behind everything */
+#app {
+    background-color: var(--bg);
+    background-image: radial-gradient(var(--qi-dot) 1px, transparent 1.2px);
+    background-size: 22px 22px;
+    background-position: -11px -11px;
+}
+
+/* --------------------------------------------------------------------------
+   3. Document title strip
+   -------------------------------------------------------------------------- */
+#app-title-bar {
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-bottom: none;
+    padding-top: max(6px, env(safe-area-inset-top, 0px));
+    padding-bottom: 0;
+}
+[data-theme="light"] #app-title-bar { background: transparent; }
+
+.app-document-name {
+    font-family: var(--qi-font-display);
+    font-style: italic;
+    font-size: 0.98rem;
+    font-weight: 400;
+    letter-spacing: 0.01em;
+    text-transform: none;
+    color: var(--text-muted);
+    line-height: 1.2;
+}
+
+/* --------------------------------------------------------------------------
+   4. Toolbar: a floating capsule instead of a full-width band
+   -------------------------------------------------------------------------- */
+#goodnotes-top-bar {
+    background: var(--surface-glass-strong);
+    border: 1px solid var(--qi-line);
+    box-shadow: var(--qi-shadow-card);
+    backdrop-filter: blur(18px) saturate(1.2);
+    -webkit-backdrop-filter: blur(18px) saturate(1.2);
+}
+
+#app[data-dock-pos="top"] #goodnotes-top-bar,
+#app[data-dock-pos="bottom"] #goodnotes-top-bar {
+    width: auto;
+    height: 56px;
+    margin: 8px 12px 0;
+    padding: 0 8px;
+    border-radius: var(--qi-radius-panel);
+    gap: 6px;
+    border: 1px solid var(--qi-line);
+}
+#app[data-dock-pos="bottom"] #goodnotes-top-bar {
+    margin: 0 12px max(10px, env(safe-area-inset-bottom, 0px));
+    height: 56px;
+    padding-bottom: 0;
+}
+
+#app[data-dock-pos="left"] #goodnotes-top-bar,
+#app[data-dock-pos="right"] #goodnotes-top-bar {
+    width: 60px;
+    height: auto;
+    align-self: stretch;
+    margin: 12px 0 12px 10px;
+    padding: 10px 0;
+    border-radius: 22px;
+    border: 1px solid var(--qi-line);
+    box-shadow: var(--qi-shadow-card);
+    background: var(--surface-glass-strong);
+}
+#app[data-dock-pos="right"] #goodnotes-top-bar { margin: 12px 10px 12px 0; }
+#app[data-dock-pos="left"] .gn-group,
+#app[data-dock-pos="right"] .gn-group,
+#app[data-dock-pos="left"] .gn-pill,
+#app[data-dock-pos="right"] .gn-pill { gap: 1px; }
+#app[data-dock-pos="left"] .gn-btn,
+#app[data-dock-pos="left"] .gn-pill-btn,
+#app[data-dock-pos="left"] .gn-tool-btn,
+#app[data-dock-pos="right"] .gn-btn,
+#app[data-dock-pos="right"] .gn-pill-btn,
+#app[data-dock-pos="right"] .gn-tool-btn {
+    width: 36px;
+    height: 32px;
+    border-color: transparent;
+}
+#app[data-dock-pos="left"] .gn-thickness-btn,
+#app[data-dock-pos="right"] .gn-thickness-btn { width: 34px; height: 24px; }
+#app[data-dock-pos="left"] .gn-color-group,
+#app[data-dock-pos="right"] .gn-color-group { gap: 6px; padding: 4px 0; }
+
+/* Groups */
+.gn-group { gap: 2px; }
+.gn-center { gap: 4px; }
+.gn-pill { gap: 2px; }
+
+/* Clusters get a quiet tray so the bar reads as a few objects, not 30 icons */
+#app[data-dock-pos="top"] .gn-main-tools,
+#app[data-dock-pos="bottom"] .gn-main-tools,
+#app[data-dock-pos="top"] .gn-settings-pill,
+#app[data-dock-pos="bottom"] .gn-settings-pill {
+    padding: 3px 4px;
+    border-radius: 14px;
+    background: var(--hover-bg);
+}
+
+/* --------------------------------------------------------------------------
+   5. Buttons
+   -------------------------------------------------------------------------- */
+.gn-btn, .gn-pill-btn, .gn-tool-btn {
+    width: 38px;
+    height: 38px;
+    border-radius: var(--qi-radius-btn);
+    color: var(--text-secondary);
+    border: 1px solid transparent;
+    transition: background-color 0.18s var(--qi-ease), color 0.18s var(--qi-ease), transform 0.25s var(--qi-spring), box-shadow 0.18s var(--qi-ease);
+}
+.gn-btn svg, .gn-pill-btn svg, .gn-tool-btn svg {
+    width: 19px;
+    height: 19px;
+}
+.gn-btn:hover, .gn-pill-btn:hover, .gn-tool-btn:hover {
+    color: var(--text);
+    background: var(--hover-bg);
+    border-color: transparent;
+    transform: translateY(-1px);
+}
+.gn-btn:active, .gn-pill-btn:active, .gn-tool-btn:active {
+    transform: translateY(1px) scale(0.96);
+}
+
+/* Active tool: ink colour, paper chip and a hand-drawn circle around it */
+.gn-tool-btn.active,
+#app .gn-tool-btn.active {
+    background: var(--surface);
+    color: var(--accent);
+    border-color: transparent;
+    box-shadow: 0 1px 0 var(--qi-line), 0 6px 14px -8px var(--accent-glow);
+}
+.gn-tool-btn.active:hover {
+    background: var(--surface);
+    transform: translateY(-1px);
+}
+.gn-tool-btn.active::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    background: var(--accent);
+    -webkit-mask: var(--qi-scribble-ring) center / 100% 100% no-repeat;
+    mask: var(--qi-scribble-ring) center / 100% 100% no-repeat;
+    pointer-events: none;
+    transform: rotate(-8deg);
+    animation: qi-ring-in 0.42s var(--qi-ease) both;
+}
+@keyframes qi-ring-in {
+    from { opacity: 0; transform: rotate(-40deg) scale(0.7); }
+    to   { opacity: 1; transform: rotate(-8deg) scale(1); }
+}
+
+/* Navigation mode on: a green "go" state that is impossible to miss */
+.gn-btn.active,
+#btn-nav-mode.active {
+    background: var(--qi-navigate);
+    color: var(--qi-paper);
+    border-color: transparent;
+    box-shadow: 0 6px 16px -8px var(--qi-navigate);
+}
+
+/* Ink to Shape */
+#btn-magic-snap {
+    color: var(--text-muted);
+    opacity: 1;
+}
+#btn-magic-snap.active {
+    color: var(--accent);
+    background: var(--accent-subtle);
+}
+
+/* Destructive action keeps a hint of red */
+#btn-clear:hover { color: var(--danger); }
+
+/* Primary export action: the one inked button in the bar */
+#btn-export {
+    color: var(--qi-paper);
+    background: var(--qi-ink);
+}
+#btn-export:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
+/* --------------------------------------------------------------------------
+   6. Dock switcher as a tiny compass (screen with four edges)
+   -------------------------------------------------------------------------- */
+.gn-pos-switcher,
+#app[data-dock-pos="left"] .gn-pos-switcher,
+#app[data-dock-pos="right"] .gn-pos-switcher {
+    display: grid;
+    grid-template-columns: 8px 1fr 8px;
+    grid-template-rows: 8px 1fr 8px;
+    align-items: stretch;
+    justify-items: stretch;
+    width: 36px;
+    height: 36px;
+    padding: 2px;
+    gap: 0;
+    box-sizing: border-box;
+    background: transparent;
+    border: 1.5px solid var(--qi-line);
+    border-radius: 9px;
+    position: relative;
+    flex-shrink: 0;
+}
+.gn-pos-switcher .gn-btn-sm {
+    width: auto;
+    height: auto;
+    border-radius: 3px;
+    color: transparent;
+    background: transparent;
+    position: relative;
+    padding: 0;
+}
+.gn-pos-switcher .gn-btn-sm svg { display: none; }
+.gn-pos-switcher .gn-btn-sm::before {
+    content: '';
+    position: absolute;
+    border-radius: 2px;
+    background: var(--text-ghost);
+    transition: background-color 0.15s, transform 0.2s var(--qi-spring);
+}
+.gn-pos-switcher .gn-btn-sm:hover { background: transparent; }
+.gn-pos-switcher .gn-btn-sm:hover::before { background: var(--text-muted); transform: scale(1.15); }
+/* top */
+.gn-pos-switcher .gn-btn-sm:nth-child(1) { grid-column: 1 / 4; grid-row: 1; }
+.gn-pos-switcher .gn-btn-sm:nth-child(1)::before { left: 4px; right: 4px; top: 2px; height: 3px; }
+/* bottom */
+.gn-pos-switcher .gn-btn-sm:nth-child(2) { grid-column: 1 / 4; grid-row: 3; }
+.gn-pos-switcher .gn-btn-sm:nth-child(2)::before { left: 4px; right: 4px; bottom: 2px; height: 3px; }
+/* left */
+.gn-pos-switcher .gn-btn-sm:nth-child(3) { grid-column: 1; grid-row: 2; }
+.gn-pos-switcher .gn-btn-sm:nth-child(3)::before { top: 0; bottom: 0; left: 2px; width: 3px; }
+/* right */
+.gn-pos-switcher .gn-btn-sm:nth-child(4) { grid-column: 3; grid-row: 2; }
+.gn-pos-switcher .gn-btn-sm:nth-child(4)::before { top: 0; bottom: 0; right: 2px; width: 3px; }
+#app[data-dock-pos="top"] .gn-pos-switcher .gn-btn-sm:nth-child(1)::before,
+#app[data-dock-pos="bottom"] .gn-pos-switcher .gn-btn-sm:nth-child(2)::before,
+#app[data-dock-pos="left"] .gn-pos-switcher .gn-btn-sm:nth-child(3)::before,
+#app[data-dock-pos="right"] .gn-pos-switcher .gn-btn-sm:nth-child(4)::before {
+    background: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+   7. Dividers become small hand-drawn squiggles
+   -------------------------------------------------------------------------- */
+.gn-pill-divider,
+#app[data-dock-pos="top"] .gn-pill-divider,
+#app[data-dock-pos="bottom"] .gn-pill-divider {
+    width: 6px;
+    height: 26px;
+    margin: 0 3px;
+    background: var(--divider);
+    -webkit-mask: var(--qi-squiggle-v) center / contain no-repeat;
+    mask: var(--qi-squiggle-v) center / contain no-repeat;
+}
+#app[data-dock-pos="left"] .gn-pill-divider,
+#app[data-dock-pos="right"] .gn-pill-divider {
+    width: 28px;
+    height: 6px;
+    margin: 4px 0;
+    -webkit-mask-image: var(--qi-squiggle-h);
+    mask-image: var(--qi-squiggle-h);
+}
+/* Inside the trays the squiggle is redundant */
+.gn-main-tools > .gn-pill-divider,
+.gn-settings-pill > .gn-pill-divider { opacity: 0.8; }
+
+/* --------------------------------------------------------------------------
+   8. Thickness and colour: stroke samples and ink drops
+   -------------------------------------------------------------------------- */
+.gn-thickness-group { gap: 1px; }
+.gn-thickness-btn {
+    width: 30px;
+    height: 32px;
+    border-radius: 9px;
+}
+.gn-thickness-btn:hover { background: var(--hover-bg); border-color: transparent; }
+.gn-thickness-btn.active {
+    background: var(--surface);
+    border-color: transparent;
+    box-shadow: 0 1px 0 var(--qi-line), 0 4px 10px -6px rgba(0, 0, 0, 0.35);
+}
+.gn-thickness-line {
+    width: 16px;
+    background-color: var(--text-dim);
+    transform: rotate(-24deg);
+    border-radius: 99px;
+}
+.gn-thickness-btn.active .gn-thickness-line,
+.gn-thickness-btn:hover .gn-thickness-line {
+    background-color: var(--qi-ink);
+}
+
+.gn-color-group { gap: 7px; padding: 0 4px; }
+/* Swatches and stroke samples are real buttons (keyboard and screen reader friendly) */
+button.gn-color-swatch {
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    -webkit-appearance: none;
+    appearance: none;
+    display: block;
+}
+.gn-thickness-line { display: block; }
+button.gn-color-swatch:focus-visible,
+.gn-thickness-btn:focus-visible,
+#color-custom:focus-visible + * {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+}
+.gn-color-swatch,
+.color-swatch.gn-color-swatch {
+    width: 19px;
+    height: 19px;
+    border: none;
+    border-radius: 50% 0 50% 50%;
+    transform: rotate(-45deg);
+    box-shadow: inset 0 -2px 3px rgba(0, 0, 0, 0.22), inset 0 2px 2px rgba(255, 255, 255, 0.25);
+    transition: transform 0.25s var(--qi-spring), box-shadow 0.2s var(--qi-ease);
+}
+.gn-color-swatch:hover {
+    transform: rotate(-45deg) scale(1.15);
+    box-shadow: inset 0 -2px 3px rgba(0, 0, 0, 0.22), inset 0 2px 2px rgba(255, 255, 255, 0.25);
+}
+.gn-color-swatch.active,
+.color-swatch.gn-color-swatch.active {
+    border: none;
+    transform: rotate(-45deg) scale(1.22);
+    box-shadow:
+        inset 0 -2px 3px rgba(0, 0, 0, 0.22),
+        0 0 0 2px var(--surface),
+        0 0 0 3.5px var(--qi-ink);
+}
+/* Custom colour stays a full drop (the conic wheel inside is circular) */
+.gn-color-swatch.custom-picker-btn { border-radius: 50% 0 50% 50%; }
+.custom-picker-btn.active {
+    box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--qi-ink);
+}
+#app[data-dock-pos="left"] .gn-color-swatch,
+#app[data-dock-pos="right"] .gn-color-swatch {
+    width: 18px;
+    height: 18px;
+}
+
+/* --------------------------------------------------------------------------
+   9. Popovers and menus: paper cards
+   -------------------------------------------------------------------------- */
+.gn-popover {
+    background: var(--surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border: 1px solid var(--qi-line);
+    border-radius: 16px;
+    box-shadow: var(--qi-shadow-card), 4px 4px 0 -1px var(--qi-hard-shadow);
+    animation: qi-pop-in 0.22s var(--qi-ease) both;
+}
+@keyframes qi-pop-in {
+    from { opacity: 0; translate: 0 -6px; }
+    to   { opacity: 1; translate: 0 0; }
+}
+#clear-menu { padding: 6px; min-width: 210px; }
+/* Export menu: opens away from the dock edge, aligned to the button */
+#export-menu {
+    padding: 6px;
+    min-width: 220px;
+    top: calc(100% + 8px);
+    right: 0;
+    left: auto;
+    transform: none;
+}
+#app[data-dock-pos="bottom"] #export-menu { top: auto; bottom: calc(100% + 8px); }
+#app[data-dock-pos="left"] #export-menu { top: auto; bottom: 0; left: calc(100% + 8px); right: auto; }
+#app[data-dock-pos="right"] #export-menu { top: auto; bottom: 0; right: calc(100% + 8px); left: auto; }
+.clear-menu-item {
+    border-radius: 10px;
+    font-size: 0.84rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+.clear-menu-item:hover { background: var(--hover-bg); color: var(--text); }
+.clear-menu-item.clear-menu-danger { color: var(--danger); }
+.clear-menu-item.clear-menu-danger:hover {
+    background: var(--danger);
+    color: #fff;
+}
+
+.settings-row { color: var(--text-secondary); font-size: 0.83rem; }
+.settings-row input[type="range"] {
+    background: var(--active-bg);
+    height: 3px;
+}
+.settings-row input[type="range"]::-webkit-slider-thumb {
+    width: 18px;
+    height: 18px;
+    background: var(--surface);
+    border: 2px solid var(--qi-ink);
+    box-shadow: 2px 2px 0 var(--accent);
+}
+.settings-row input[type="checkbox"] {
+    border-radius: 5px;
+    border: 1.5px solid var(--qi-line-strong);
+    background: transparent;
+}
+.settings-row input[type="checkbox"]:checked {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+   10. Workspace: a cutting mat framed like a sheet on the desk
+   -------------------------------------------------------------------------- */
+#main-view {
+    padding: 10px 12px 0;
+    box-sizing: border-box;
+}
+#app[data-dock-pos="left"] #main-view { padding: 12px 12px 0 10px; }
+#app[data-dock-pos="right"] #main-view { padding: 12px 10px 0 12px; }
+#app[data-dock-pos="bottom"] #main-view { padding-top: 6px; }
+
+#workspace {
+    border-radius: var(--qi-radius-panel);
+    border: 1px solid var(--qi-line);
+    background: var(--surface);
+    box-shadow: var(--qi-shadow-card);
+    isolation: isolate;
+}
+
+#editor-area {
+    background-color: var(--editor-chrome-bg);
+    background-image:
+        linear-gradient(var(--qi-mat-line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--qi-mat-line) 1px, transparent 1px);
+    background-size: 28px 28px;
+    background-position: center center;
+}
+#content-frame { background: transparent; }
+
+/* Slide arrows: the full-height rails stay clickable, the icon becomes a paper coin */
+.slide-nav-prev,
+.slide-nav-next,
+.slide-nav-prev:hover,
+.slide-nav-next:hover {
+    background: transparent !important;
+    box-shadow: none !important;
+}
+.slide-nav-btn { color: var(--text); }
+.slide-nav-btn svg {
+    width: 40px;
+    height: 40px;
+    padding: 10px;
+    box-sizing: border-box;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1px solid var(--qi-line);
+    box-shadow: var(--qi-shadow-card), 2px 2px 0 var(--qi-hard-shadow);
+    stroke-width: 2.4;
+    transition: transform 0.25s var(--qi-spring), background-color 0.18s, color 0.18s;
+}
+@media (hover: hover) and (pointer: fine) {
+    .slide-nav-btn:hover { color: var(--qi-paper); }
+    .slide-nav-btn:hover svg {
+        background: var(--qi-ink);
+        filter: none;
+        transform: scale(1.08);
+    }
+    .slide-nav-prev:hover svg { transform: translateX(-2px) scale(1.08); }
+    .slide-nav-next:hover svg { transform: translateX(2px) scale(1.08); }
+}
+
+/* --------------------------------------------------------------------------
+   11. Slide navigator: index cards with tape on the current one
+   -------------------------------------------------------------------------- */
+#sidebar {
+    top: 10px;
+    right: 10px;
+    bottom: 10px;
+    width: 286px;
+    border-radius: var(--qi-radius-panel);
+    border: 1px solid var(--qi-line);
+    background: var(--surface-glass-strong);
+    box-shadow: var(--qi-shadow-card), 5px 5px 0 -1px var(--qi-hard-shadow);
+}
+.sidebar-header {
+    padding: 18px 20px 12px;
+    border-bottom: none;
+    font-family: var(--qi-font-display);
+    font-style: italic;
+    font-weight: 400;
+    font-size: 1.55rem;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--text);
+    line-height: 1.1;
+    position: relative;
+}
+.sidebar-header::after {
+    content: '';
+    display: block;
+    width: 64px;
+    height: 7px;
+    margin-top: 4px;
+    background: var(--accent);
+    -webkit-mask: var(--qi-squiggle-h) left center / 64px 7px no-repeat;
+    mask: var(--qi-squiggle-h) left center / 64px 7px no-repeat;
+}
+.annotation-list { padding: 6px 12px 14px; }
+
+.sidebar-item {
+    gap: 12px;
+    padding: 11px 12px;
+    margin-bottom: 8px;
+    border: 1px solid var(--qi-line);
+    border-bottom: 1px solid var(--qi-line);
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--text-secondary);
+    overflow: visible;
+    transition: transform 0.25s var(--qi-spring), box-shadow 0.2s var(--qi-ease), border-color 0.2s;
+    /* Ruled index-card line */
+    background-image: linear-gradient(transparent calc(100% - 9px), var(--accent-subtle) calc(100% - 9px), var(--accent-subtle) calc(100% - 8px), transparent calc(100% - 8px));
+}
+.sidebar-item:hover {
+    background-color: var(--surface);
+    color: var(--text);
+    transform: translateX(-3px) rotate(-0.4deg);
+    box-shadow: 3px 3px 0 var(--qi-line);
+}
+.sidebar-item.active {
+    background-color: var(--surface);
+    color: var(--text);
+    border-color: var(--qi-line-strong);
+    box-shadow: 4px 4px 0 var(--qi-hard-shadow);
+    transform: rotate(-0.8deg);
+}
+.sidebar-item.active::before {
+    content: '';
+    position: absolute;
+    top: -7px;
+    right: 18px;
+    width: 46px;
+    height: 14px;
+    background: var(--qi-tape);
+    transform: rotate(5deg);
+    border-radius: 2px;
+}
+.sidebar-slide-num {
+    width: 34px;
+    height: 34px;
+    background: transparent;
+    border: none;
+    font-family: var(--qi-font-hand);
+    font-weight: 400;
+    font-size: 1.15rem;
+    color: var(--text-dim);
+}
+.sidebar-item.active .sidebar-slide-num {
+    background: transparent;
+    color: var(--accent);
+    border: none;
+}
+.sidebar-slide-title {
+    font-weight: 500;
+    font-size: 0.86rem;
+    letter-spacing: -0.005em;
+}
+.sidebar-badge {
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 99px;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-family: var(--qi-font-mono);
+    font-size: 0.66rem;
+    box-shadow: none;
+    transform: rotate(-6deg);
+}
+
+/* --------------------------------------------------------------------------
+   11b. Open presentations: folder tabs on top of the sheet
+   -------------------------------------------------------------------------- */
+.qi-doc-tabs {
+    position: relative;
+    z-index: 3;
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    height: 40px;
+    padding: 0 14px;
+    margin-bottom: -1px;
+    flex-shrink: 0;
+}
+.qi-doc-tabs[hidden] { display: none; }
+/* Decks open in other tabs stay loaded behind the visible one (same size, so no relayout on switch) */
+#editor-stage iframe.qi-parked-frame {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    visibility: hidden;
+    pointer-events: none;
+    z-index: -1;
+}
+/* The property panel (opened from the toolbar) may extend over the tabs; keep it on top */
+#app[data-quarto-excal-toolpanel="1"] .qi-doc-tabs { z-index: 0; }
+#main-view.qi-has-doc-tabs { padding-top: 4px; }
+#main-view.qi-has-doc-tabs #workspace { border-top-left-radius: 12px; }
+
+.qi-doc-tablist {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    min-width: 0;
+    height: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+}
+.qi-doc-tablist::-webkit-scrollbar { display: none; }
+
+.qi-doc-tab {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    height: 34px;
+    max-width: 260px;
+    padding: 0 6px 0 4px;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: 12px 12px 0 0;
+    color: var(--text-muted);
+    transform: translateY(3px) rotate(var(--qi-tab-tilt, 0deg));
+    transform-origin: bottom center;
+    transition: background-color 0.18s var(--qi-ease), color 0.18s, transform 0.25s var(--qi-spring);
+}
+.qi-doc-tab:hover {
+    background: var(--hover-bg);
+    color: var(--text);
+    transform: translateY(1px) rotate(0deg);
+}
+.qi-doc-tab.is-active {
+    height: 38px;
+    background: var(--surface);
+    border-color: var(--qi-line);
+    color: var(--text);
+    transform: none;
+    box-shadow: 0 -6px 14px -12px rgba(0, 0, 0, 0.45);
+}
+/* A short ink stroke marks the open sheet */
+.qi-doc-tab.is-active::before {
+    content: '';
+    position: absolute;
+    left: 14px;
+    top: 5px;
+    width: 30px;
+    height: 6px;
+    background: var(--accent);
+    -webkit-mask: var(--qi-squiggle-h) left center / 30px 6px no-repeat;
+    mask: var(--qi-squiggle-h) left center / 30px 6px no-repeat;
+}
+.qi-doc-tab-main {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    height: 100%;
+    padding: 0 6px 0 10px;
+    border: none;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+}
+.qi-doc-tab.is-active .qi-doc-tab-main { padding-top: 6px; }
+.qi-doc-tab-name {
+    font-family: var(--qi-font-display);
+    font-style: italic;
+    font-size: 1.04rem;
+    line-height: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 190px;
+}
+.qi-doc-tab-slide {
+    flex-shrink: 0;
+    min-width: 18px;
+    padding: 2px 5px;
+    border-radius: 99px;
+    background: var(--active-bg);
+    color: var(--text-muted);
+    font-family: var(--qi-font-mono);
+    font-size: 0.6rem;
+    line-height: 1.2;
+    text-align: center;
+}
+.qi-doc-tab-close {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s, background-color 0.15s, color 0.15s;
+}
+.qi-doc-tab-close svg { width: 13px; height: 13px; }
+.qi-doc-tab:hover .qi-doc-tab-close,
+.qi-doc-tab.is-active .qi-doc-tab-close,
+.qi-doc-tab-close:focus-visible { opacity: 0.7; }
+.qi-doc-tab-close:hover { opacity: 1; background: var(--danger); color: #fff; }
+.qi-doc-tab.is-active .qi-doc-tab-close { margin-top: 6px; }
+
+.qi-doc-add {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    margin: 0 0 4px 2px;
+    padding: 0;
+    border: 1.5px dashed var(--qi-line-strong);
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.15s, color 0.15s, border-color 0.15s, transform 0.25s var(--qi-spring);
+}
+.qi-doc-add svg { width: 15px; height: 15px; }
+.qi-doc-add:hover {
+    opacity: 1;
+    color: var(--accent);
+    border-color: var(--accent);
+    transform: rotate(90deg);
+}
+
+@media (hover: none) and (pointer: coarse) {
+    .qi-doc-tab-close { opacity: 0.7; }
+}
+
+/* --------------------------------------------------------------------------
+   12. Status bar with ruler scrubber and a rubber-stamp mode badge
+   -------------------------------------------------------------------------- */
+#status-bar {
+    background: transparent;
+    border-top: none;
+    height: calc(38px + env(safe-area-inset-bottom, 0px));
+    padding: 0 6px env(safe-area-inset-bottom, 0px);
+    gap: 18px;
+    font-family: var(--qi-font-mono);
+    font-size: 0.68rem;
+    color: var(--text-muted);
+}
+#status-left {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+#status-left::before {
+    content: '';
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--qi-navigate);
+    box-shadow: 0 0 0 3px var(--success-glow);
+    flex-shrink: 0;
+}
+#status-right { gap: 14px; flex-shrink: 0; }
+#nav-hint { opacity: 0.75; color: var(--text-dim); }
+#slide-indicator { color: var(--text-secondary); font-weight: 500; }
+
+.qi-slide-ruler {
+    flex: 1 1 auto;
+    max-width: 520px;
+    min-width: 120px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 0.3s;
+    touch-action: none;
+}
+.qi-slide-ruler.is-ready { visibility: visible; opacity: 1; }
+.qi-ruler-track {
+    position: relative;
+    width: 100%;
+    height: 12px;
+    /* Tick marks: one per slide (count set from JS) */
+    background-image: linear-gradient(90deg, var(--text-ghost) 1px, transparent 1px);
+    background-size: calc(100% / var(--qi-slides, 10)) 100%;
+    background-repeat: repeat-x;
+    background-position: left bottom;
+    border-bottom: 1px solid var(--text-ghost);
+}
+.qi-ruler-fill {
+    position: absolute;
+    left: 0;
+    bottom: -1px;
+    height: 3px;
+    width: var(--qi-progress, 0%);
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.35s var(--qi-ease);
+}
+.qi-ruler-thumb {
+    position: absolute;
+    bottom: -5px;
+    left: var(--qi-progress, 0%);
+    width: 11px;
+    height: 11px;
+    margin-left: -5.5px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 2px solid var(--accent);
+    box-sizing: border-box;
+    transition: left 0.35s var(--qi-ease), transform 0.2s var(--qi-spring);
+}
+.qi-slide-ruler:hover .qi-ruler-thumb { transform: scale(1.3); }
+.qi-ruler-tip {
+    position: absolute;
+    bottom: 22px;
+    transform: translateX(-50%);
+    padding: 3px 8px;
+    border-radius: 7px;
+    background: var(--qi-ink);
+    color: var(--qi-paper);
+    font-size: 0.66rem;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+.qi-slide-ruler:hover .qi-ruler-tip { opacity: 1; }
+
+#mode-badge {
+    font-family: var(--qi-font-mono);
+    font-size: 0.64rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    padding: 3px 10px 2px;
+    border-radius: 5px;
+    transform: rotate(-3deg);
+    background: transparent;
+}
+#mode-badge.mode-drawing {
+    color: var(--accent);
+    border: 1.5px solid var(--accent);
+    background: var(--accent-subtle);
+}
+#mode-badge.mode-navigating {
+    color: var(--qi-navigate);
+    border: 1.5px solid var(--qi-navigate);
+    background: var(--success-glow);
+    transform: rotate(2deg);
+}
+
+/* --------------------------------------------------------------------------
+   13. Landing (drop zone)
+   -------------------------------------------------------------------------- */
+#drop-zone.qi-landing {
+    position: relative;
+    flex: 1 0 100%;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background:
+        radial-gradient(900px 500px at 82% 12%, var(--accent-subtle), transparent 70%),
+        var(--surface);
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    box-sizing: border-box;
+    justify-content: flex-start;
+    align-items: stretch;
+    transition: box-shadow 0.25s var(--qi-ease);
+}
+#drop-zone.qi-landing.dragover {
+    box-shadow: inset 0 0 0 3px var(--accent);
+    background-color: var(--surface);
+}
+
+.qi-landing-inner {
+    flex: 1 0 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    align-items: center;
+    gap: clamp(32px, 5vw, 80px);
+    width: 100%;
+    max-width: 1220px;
+    /* Centred when there is room, top-aligned (scrollable) when there is not */
+    margin: auto;
+    padding: clamp(24px, 4vh, 56px) clamp(24px, 5vw, 72px) 20px;
+    box-sizing: border-box;
+}
+
+.qi-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 22px;
+    font-family: var(--qi-font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+.qi-eyebrow-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.qi-hero-title {
+    margin: 0 0 26px;
+    font-family: var(--qi-font-display);
+    font-weight: 400;
+    font-size: clamp(2.9rem, 5.4vw, 5.4rem);
+    line-height: 0.95;
+    letter-spacing: -0.025em;
+    color: var(--text);
+}
+.qi-hero-line { display: block; }
+.qi-hero-soft { font-style: italic; color: var(--text-dim); }
+.qi-circled {
+    position: relative;
+    font-style: italic;
+    color: var(--accent);
+    padding: 0 0.06em;
+}
+.qi-scribble {
+    position: absolute;
+    left: -7%;
+    top: -4%;
+    width: 114%;
+    height: 112%;
+    overflow: visible;
+    pointer-events: none;
+}
+.qi-scribble path {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 3.2;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    animation: qi-draw 1.1s 0.35s var(--qi-ease) forwards;
+}
+@keyframes qi-draw { to { stroke-dashoffset: 0; } }
+
+.qi-hero-sub {
+    max-width: 34em;
+    margin: 0 0 26px;
+    font-size: 1.04rem;
+    line-height: 1.6;
+    color: var(--text-secondary);
+}
+
+.qi-cta-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px 20px;
+    margin-bottom: 28px;
+}
+#drop-zone .primary-btn.qi-cta,
+.qi-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    width: auto;
+    max-width: none;
+    margin: 0;
+    padding: 14px 24px 14px 20px;
+    border-radius: 14px;
+    border: 1.5px solid var(--qi-ink);
+    background: var(--qi-ink);
+    color: var(--qi-paper);
+    font-family: var(--qi-font-ui);
+    font-size: 0.98rem;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    cursor: pointer;
+    box-shadow: 4px 4px 0 var(--accent);
+    transition: transform 0.2s var(--qi-spring), box-shadow 0.2s var(--qi-ease);
+    text-decoration: none;
+}
+.qi-cta svg { width: 20px; height: 20px; }
+.qi-cta:hover {
+    transform: translate(-2px, -2px);
+    box-shadow: 6px 6px 0 var(--accent);
+    background: var(--qi-ink);
+}
+.qi-cta:active {
+    transform: translate(2px, 2px);
+    box-shadow: 1px 1px 0 var(--accent);
+}
+.qi-cta-hint {
+    font-size: 0.86rem;
+    color: var(--text-muted);
+}
+.qi-cta-hint code {
+    font-family: var(--qi-font-mono);
+    font-size: 0.8rem;
+    padding: 1px 6px;
+    border-radius: 5px;
+    background: var(--hover-bg);
+    color: var(--text-secondary);
+}
+
+.qi-notes {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 26px;
+    font-family: var(--qi-font-hand);
+    font-size: 1.02rem;
+    color: var(--text-secondary);
+}
+.qi-notes li { display: flex; align-items: center; gap: 9px; }
+.qi-notes b { font-weight: 400; color: var(--accent); }
+.qi-note-num {
+    display: inline-grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    font-size: 0.85rem;
+    color: var(--accent);
+    position: relative;
+}
+.qi-note-num::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    background: var(--accent);
+    -webkit-mask: var(--qi-scribble-ring) center / 100% 100% no-repeat;
+    mask: var(--qi-scribble-ring) center / 100% 100% no-repeat;
+    opacity: 0.85;
+}
+
+/* Product sketch on the right */
+.qi-preview {
+    position: relative;
+    aspect-ratio: 16 / 11;
+    width: 100%;
+    max-width: 560px;
+    justify-self: center;
+}
+.qi-sheet {
+    position: absolute;
+    left: 6%;
+    right: 2%;
+    top: 8%;
+    aspect-ratio: 16 / 9;
+    border-radius: 10px;
+}
+.qi-sheet-back {
+    background: var(--surface-elevated);
+    border: 1px solid var(--qi-line);
+    transform: rotate(5deg) translate(4%, 4%);
+}
+.qi-sheet-front {
+    background: #fbfaf6;
+    border: 1px solid rgba(29, 27, 23, 0.18);
+    box-shadow: var(--qi-shadow-card), 6px 6px 0 var(--qi-hard-shadow);
+    transform: rotate(-3deg);
+    overflow: hidden;
+    transition: transform 0.45s var(--qi-spring);
+}
+.qi-preview:hover .qi-sheet-front { transform: rotate(-1.5deg) translateY(-4px); }
+.qi-sheet-art { display: block; width: 100%; height: 100%; }
+.qa-paper { fill: #fbfaf6; }
+.qa-ink { fill: #26241f; }
+.qa-faint { fill: #d9d3c6; }
+.qa-axis { stroke: #cfc8b9; stroke-width: 2; }
+.qa-bar { fill: #cbc4b5; }
+.qa-bar-hot { fill: #26241f; }
+.qa-stroke {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    animation: qi-draw 0.9s var(--qi-ease) forwards;
+}
+.qa-hl { stroke: rgba(255, 205, 40, 0.65); stroke-width: 20; mix-blend-mode: multiply; animation-delay: 0.6s; }
+.qa-ring { stroke: #df4a1f; stroke-width: 4.5; animation-delay: 1.2s; animation-duration: 1s; }
+.qa-arrow { stroke: #df4a1f; stroke-width: 4; animation-delay: 1.9s; }
+.qa-note {
+    font-family: var(--qi-font-hand);
+    font-size: 30px;
+    fill: #df4a1f;
+    opacity: 0;
+    transform: rotate(-6deg);
+    transform-origin: 540px 70px;
+    animation: qi-fade 0.4s 2.5s forwards;
+}
+@keyframes qi-fade { to { opacity: 1; } }
+
+.qi-drop-target {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    border: 2.5px dashed var(--accent);
+    border-radius: 22px;
+    background: color-mix(in srgb, var(--surface) 82%, transparent);
+    color: var(--accent);
+    font-family: var(--qi-font-hand);
+    font-size: 1.7rem;
+    opacity: 0;
+    transform: scale(0.96);
+    pointer-events: none;
+    transition: opacity 0.2s, transform 0.3s var(--qi-spring);
+}
+#drop-zone.dragover .qi-drop-target { opacity: 1; transform: scale(1); }
+#drop-zone.dragover .qi-sheet-front { transform: rotate(0deg) scale(0.94); }
+
+.qi-preview-caption {
+    position: absolute;
+    left: 8%;
+    bottom: 0;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--qi-font-hand);
+    font-size: 0.95rem;
+    color: var(--text-muted);
+}
+.qi-quarto-logo { height: 22px; width: auto; color: var(--text-secondary); }
+
+.qi-landing-foot {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px 24px;
+    width: 100%;
+    max-width: 1220px;
+    margin: 0 auto;
+    padding: 14px clamp(24px, 5vw, 72px) 22px;
+    box-sizing: border-box;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    border-top: 1px dashed var(--qi-line);
+}
+.qi-foot-privacy { display: inline-flex; align-items: center; gap: 8px; }
+.qi-foot-privacy svg { width: 15px; height: 15px; color: var(--qi-navigate); }
+.qi-foot-keys { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.qi-foot-keys kbd,
+.kbd {
+    display: inline-block;
+    min-width: 1.6em;
+    padding: 2px 7px 3px;
+    border-radius: 6px;
+    border: 1px solid var(--qi-line);
+    border-bottom-width: 2.5px;
+    background: var(--kbd-bg);
+    color: var(--text);
+    font-family: var(--qi-font-mono);
+    font-size: 0.72rem;
+    line-height: 1.3;
+    text-align: center;
+    box-sizing: border-box;
+}
+.qi-foot-keys kbd:not(:first-child) { margin-left: 8px; }
+
+/* --------------------------------------------------------------------------
+   14. Modals and alert cards
+   -------------------------------------------------------------------------- */
+.modal-overlay {
+    background: var(--overlay-bg);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+}
+.modal-content {
+    position: relative;
+    background: var(--surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border: 1px solid var(--qi-line);
+    border-radius: 22px;
+    padding: 36px 36px 30px;
+    max-width: 600px;
+    box-shadow: var(--qi-shadow-card), 7px 7px 0 var(--qi-hard-shadow);
+    animation: qi-card-in 0.35s var(--qi-spring) both;
+}
+.modal-content::before,
+.modal-content::after {
+    content: '';
+    position: absolute;
+    top: -9px;
+    width: 64px;
+    height: 18px;
+    background: var(--qi-tape);
+    border-radius: 2px;
+}
+.modal-content::before { left: 34px; transform: rotate(-5deg); }
+.modal-content::after { right: 34px; transform: rotate(4deg); }
+@keyframes qi-card-in {
+    from { opacity: 0; transform: translateY(14px) rotate(1.5deg); }
+    to   { opacity: 1; transform: none; }
+}
+.modal-header {
+    font-family: var(--qi-font-display);
+    font-style: italic;
+    font-weight: 400;
+    font-size: 2.3rem;
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+    margin-bottom: 22px;
+    color: var(--text);
+}
+.shortcut-grid { gap: 4px 28px; }
+.shortcut-item {
+    padding: 8px 0;
+    border-bottom: 1px dashed var(--qi-line);
+    font-size: 0.88rem;
+}
+.shortcut-item span:first-child { color: var(--text-secondary); }
+.modal-social { border-top: none; margin-top: 22px; padding-top: 0; }
+.modal-social-label { font-family: var(--qi-font-hand); text-transform: none; letter-spacing: 0; font-size: 0.95rem; }
+.modal-social-link {
+    background: transparent;
+    border: 1px solid var(--qi-line);
+    border-radius: 12px;
+    color: var(--text-secondary);
+}
+.modal-social-link:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-subtle); }
+#modal-help .primary-btn {
+    margin-top: 22px;
+    padding: 13px 18px;
+    border-radius: 14px;
+    border: 1.5px solid var(--qi-ink);
+    background: var(--qi-ink);
+    color: var(--qi-paper);
+    font-weight: 600;
+    box-shadow: 4px 4px 0 var(--accent);
+    transition: transform 0.2s var(--qi-spring), box-shadow 0.2s;
+}
+#modal-help .primary-btn:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 var(--accent); }
+
+/* In-app alert / confirm dialogs (replace window.alert and window.confirm) */
+.qi-dialog { z-index: 10050; }
+.qi-dialog-card { max-width: 440px; padding: 30px 30px 24px; }
+.qi-dialog-card .modal-header { font-size: 1.9rem; margin-bottom: 10px; }
+.qi-dialog-message {
+    margin: 0 0 24px;
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    line-height: 1.55;
+}
+.qi-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.qi-dialog-btn {
+    padding: 10px 18px;
+    border-radius: 12px;
+    font-family: var(--qi-font-ui);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.2s var(--qi-spring), box-shadow 0.2s;
+}
+.qi-dialog-cancel {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--qi-line);
+}
+.qi-dialog-cancel:hover { background: var(--hover-bg); color: var(--text); }
+.qi-dialog-ok {
+    background: var(--qi-ink);
+    color: var(--qi-paper);
+    border: 1.5px solid var(--qi-ink);
+    box-shadow: 3px 3px 0 var(--accent);
+}
+.qi-dialog-ok:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--accent); }
+.qi-dialog-ok.is-danger { background: var(--danger); border-color: var(--danger); color: #fff; box-shadow: 3px 3px 0 var(--qi-hard-shadow); }
+
+/* PDF export progress (assets/ui/quarto-ink-export.js) */
+.qi-export-progress { z-index: 10040; }
+.qi-export-progress .qi-dialog-message { margin-bottom: 14px; }
+.qi-export-bar {
+    height: 6px;
+    margin: 0 0 22px;
+    border-radius: 999px;
+    background: var(--active-bg);
+    overflow: hidden;
+}
+.qi-export-bar span {
+    display: block;
+    width: 0;
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.2s var(--qi-ease);
+}
+
+body .ios-pwa-card {
+    background: var(--surface);
+    border: 1px solid var(--qi-line);
+    border-radius: 22px;
+    box-shadow: var(--qi-shadow-card), 7px 7px 0 var(--qi-hard-shadow);
+    color: var(--text);
+}
+body .ios-pwa-card h3 {
+    font-family: var(--qi-font-display);
+    font-style: italic;
+    font-weight: 400;
+    font-size: 1.9rem;
+    letter-spacing: -0.01em;
+}
+body .ios-pwa-dismiss {
+    background: var(--qi-ink);
+    color: var(--qi-paper);
+    border-radius: 12px;
+    box-shadow: 3px 3px 0 var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+   15. Excalidraw: theme accents and the secondary (property) toolbar
+   -------------------------------------------------------------------------- */
+#excalidraw-host .excalidraw {
+    --color-primary: var(--accent);
+    --color-primary-darker: var(--accent-hover);
+    --color-primary-darkest: var(--accent-hover);
+    --color-primary-light: var(--accent-subtle);
+    --color-primary-light-darker: var(--accent-glow);
+    --color-primary-hover: var(--accent-hover);
+    --focus-highlight-color: var(--accent-glow);
+    --color-surface-primary-container: var(--accent-subtle);
+    --color-on-primary-container: var(--accent);
+    --color-slider-track: var(--accent-subtle);
+    --color-slider-thumb: var(--accent);
+    --color-selection: var(--accent);
+    /* Excalidraw's own lavender/indigo surfaces and focus rings */
+    --color-brand-hover: var(--accent);
+    --color-brand-active: var(--accent-hover);
+    --color-surface-high: var(--surface-elevated);
+    --color-surface-mid: var(--surface-elevated);
+    --color-surface-low: var(--surface-elevated);
+    --button-hover-bg: var(--hover-bg);
+    --button-active-bg: var(--active-bg);
+    --button-active-border: var(--accent);
+    --island-bg-color: var(--surface);
+    --default-border-color: var(--qi-line);
+}
+
+/* The panel opened with the toolbar arrow (desktop) or the mobile menu */
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .Island,
+body[data-theme] #app[data-quarto-excal-toolpanel="1"] #excalidraw-host .excalidraw .App-menu_top .Island,
+body[data-theme] #app[data-quarto-excal-toolpanel="1"] #excalidraw-host .excalidraw .App-menu_bottom .Island {
+    background: var(--surface) !important;
+    border: 1px solid var(--qi-line) !important;
+    border-radius: 18px !important;
+    box-shadow: var(--qi-shadow-card), 5px 5px 0 -1px var(--qi-hard-shadow) !important;
+    padding: 12px 8px 14px !important;
+    gap: 0 !important;
+    color: var(--text);
+}
+
+/* Sections separated by a dashed rule, like columns on a ruled sheet */
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .panelColumn > * {
+    position: relative;
+    padding: 0 16px !important;
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .panelColumn > * + * {
+    border-left: 1px dashed var(--qi-line) !important;
+}
+
+/* Section titles in hand lettering */
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions h3,
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions legend,
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .control-label {
+    font-family: var(--qi-font-hand) !important;
+    font-size: 0.98rem !important;
+    font-weight: 400 !important;
+    letter-spacing: 0 !important;
+    text-transform: lowercase !important;
+    color: var(--text-muted) !important;
+    margin: 0 0 8px !important;
+    padding: 0 !important;
+    line-height: 1.1 !important;
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions fieldset {
+    border: none !important;
+    margin: 0 !important;
+    min-width: 0;
+}
+
+/* Colours: ink drops, the chosen one gets an inked ring */
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .color-picker__top-picks {
+    gap: 7px !important;
+    align-items: center;
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .color-picker__button {
+    width: 22px !important;
+    height: 22px !important;
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 50% 0 50% 50% !important;
+    transform: rotate(-45deg);
+    box-shadow: inset 0 -2px 3px rgba(0, 0, 0, 0.22), inset 0 2px 2px rgba(255, 255, 255, 0.25) !important;
+    transition: transform 0.25s var(--qi-spring);
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .color-picker__button:hover {
+    transform: rotate(-45deg) scale(1.15);
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .color-picker__button.is-transparent {
+    box-shadow: inset 0 0 0 1.5px var(--qi-line) !important;
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .color-picker__button-outline {
+    inset: 0 !important;
+    border: none !important;
+    border-radius: inherit !important;
+    box-shadow: none !important;
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .color-picker__button.active {
+    transform: rotate(-45deg) scale(1.12);
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .color-picker__button.active .color-picker__button-outline {
+    box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--qi-ink) !important;
+}
+/* Divider before the "current colour" trigger becomes a squiggle */
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .color-picker__top-picks + div {
+    width: 6px !important;
+    height: 22px !important;
+    margin: 0 6px !important;
+    border: none !important;
+    background: var(--divider) !important;
+    -webkit-mask: var(--qi-squiggle-v) center / contain no-repeat;
+    mask: var(--qi-squiggle-v) center / contain no-repeat;
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .color-picker__button:focus-visible::after {
+    border-color: var(--accent) !important;
+}
+
+/* Stroke width and layers: one segmented rail each */
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .buttonList {
+    display: inline-flex !important;
+    gap: 2px !important;
+    padding: 3px !important;
+    border-radius: 12px !important;
+    background: var(--hover-bg) !important;
+    flex-wrap: nowrap !important;
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .buttonList label,
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .buttonList button {
+    width: 34px !important;
+    height: 30px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 9px !important;
+    background: transparent !important;
+    color: var(--text-secondary) !important;
+    box-shadow: none !important;
+    cursor: pointer;
+    transition: background-color 0.15s, color 0.15s, transform 0.2s var(--qi-spring) !important;
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .buttonList label:hover,
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .buttonList button:hover {
+    background: var(--surface) !important;
+    color: var(--text) !important;
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .buttonList label.active,
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .buttonList label:has(input:checked) {
+    background: var(--surface) !important;
+    color: var(--accent) !important;
+    box-shadow: 0 1px 0 var(--qi-line), 2px 2px 0 var(--qi-hard-shadow) !important;
+    transform: translateY(-1px);
+}
+/* No lavender focus frame after clicking an option; keyboard focus still shows */
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .buttonList label:focus-within,
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .buttonList button:focus {
+    box-shadow: none !important;
+    outline: none !important;
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .buttonList label.active:focus-within {
+    box-shadow: 0 1px 0 var(--qi-line), 2px 2px 0 var(--qi-hard-shadow) !important;
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .buttonList label:has(input:focus-visible),
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .buttonList button:focus-visible {
+    outline: 2px solid var(--accent) !important;
+    outline-offset: 1px;
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .buttonList svg {
+    width: 18px !important;
+    height: 18px !important;
+    color: currentColor !important;
+}
+
+/* Opacity: ink slider with quiet mono labels */
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .range-wrapper {
+    min-width: 116px;
+    padding-top: 4px;
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .range-input {
+    /* Excalidraw paints the fill inline from these two variables */
+    --color-slider-track: var(--accent);
+    --button-bg: var(--active-bg);
+    height: 3px !important;
+    border-radius: 2px !important;
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .range-input::-webkit-slider-thumb {
+    width: 16px !important;
+    height: 16px !important;
+    background: var(--surface) !important;
+    border: 2px solid var(--qi-ink) !important;
+    box-shadow: 2px 2px 0 var(--accent) !important;
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .range-input::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    background: var(--surface);
+    border: 2px solid var(--qi-ink);
+    box-shadow: 2px 2px 0 var(--accent);
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .value-bubble,
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .zero-label {
+    font-family: var(--qi-font-mono) !important;
+    font-size: 0.62rem !important;
+    font-weight: 500 !important;
+    color: var(--text-dim) !important;
+    background: transparent !important;
+}
+
+/* --------------------------------------------------------------------------
+   16. Responsive
+   -------------------------------------------------------------------------- */
+@media (max-width: 1360px) {
+    #app[data-dock-pos="top"] .gn-btn,
+    #app[data-dock-pos="top"] .gn-pill-btn,
+    #app[data-dock-pos="top"] .gn-tool-btn,
+    #app[data-dock-pos="bottom"] .gn-btn,
+    #app[data-dock-pos="bottom"] .gn-pill-btn,
+    #app[data-dock-pos="bottom"] .gn-tool-btn {
+        width: 34px;
+        height: 34px;
+    }
+    #app[data-dock-pos="top"] .gn-thickness-btn,
+    #app[data-dock-pos="bottom"] .gn-thickness-btn { width: 26px; }
+    .gn-color-group { gap: 6px; padding: 0 2px; }
+    #app[data-dock-pos="top"] .gn-pill-divider,
+    #app[data-dock-pos="bottom"] .gn-pill-divider { margin: 0 1px; }
+}
+
+/* Narrow screens: the bar wraps onto a second row instead of hiding tools */
+@media (max-width: 1180px) {
+    #app[data-dock-pos="top"] #goodnotes-top-bar,
+    #app[data-dock-pos="bottom"] #goodnotes-top-bar {
+        height: auto !important;
+        min-height: 52px;
+        flex-wrap: wrap;
+        justify-content: center;
+        row-gap: 4px;
+        padding: 6px 8px;
+    }
+    /* Let the two tool trays wrap independently instead of as one block */
+    #app[data-dock-pos="top"] .gn-center,
+    #app[data-dock-pos="bottom"] .gn-center {
+        display: contents;
+    }
+    #app[data-dock-pos="top"] #goodnotes-top-bar,
+    #app[data-dock-pos="bottom"] #goodnotes-top-bar {
+        column-gap: 6px;
+    }
+}
+
+@media (max-width: 900px) {
+    .qi-landing-inner {
+        grid-template-columns: 1fr;
+        padding-top: 28px;
+    }
+    .qi-preview { max-width: 460px; order: -1; }
+    #sidebar { width: min(286px, calc(100% - 20px)); }
+    #nav-hint { display: none; }
+}
+
+@media (max-width: 768px) {
+    #main-view { padding: 6px 6px 0; }
+    #app[data-dock-pos="top"] .gn-btn,
+    #app[data-dock-pos="top"] .gn-pill-btn,
+    #app[data-dock-pos="top"] .gn-tool-btn,
+    #app[data-dock-pos="bottom"] .gn-btn,
+    #app[data-dock-pos="bottom"] .gn-pill-btn,
+    #app[data-dock-pos="bottom"] .gn-tool-btn {
+        width: 32px;
+        height: 32px;
+    }
+    .qi-landing-inner { gap: 20px; padding: 20px 20px 16px; }
+    .qi-preview { max-width: 340px; }
+    #app[data-dock-pos="top"] #goodnotes-top-bar,
+    #app[data-dock-pos="bottom"] #goodnotes-top-bar { margin-left: 6px; margin-right: 6px; }
+    .qi-hero-title { font-size: clamp(2.6rem, 11vw, 3.6rem); }
+    .qi-notes { flex-direction: column; }
+    .qi-foot-keys { display: none; }
+    .qi-slide-ruler { min-width: 80px; }
+    .modal-content { padding: 28px 22px 22px; }
+}
+
+@media (hover: none) and (pointer: coarse) {
+    /* Keep generous touch targets on tablets */
+    #app[data-dock-pos="top"] .gn-btn,
+    #app[data-dock-pos="top"] .gn-pill-btn,
+    #app[data-dock-pos="top"] .gn-tool-btn,
+    #app[data-dock-pos="bottom"] .gn-btn,
+    #app[data-dock-pos="bottom"] .gn-pill-btn,
+    #app[data-dock-pos="bottom"] .gn-tool-btn {
+        width: 38px;
+        height: 38px;
+    }
+    .gn-btn:hover, .gn-pill-btn:hover, .gn-tool-btn:hover { transform: none; }
+    .sidebar-item:hover { transform: none; box-shadow: none; }
+}
+
+/* Vertical docks: two columns so the whole tool set fits without scrolling */
+#app[data-dock-pos="left"] #goodnotes-top-bar,
+#app[data-dock-pos="right"] #goodnotes-top-bar {
+    width: 86px;
+    padding: 10px 4px;
+    gap: 4px;
+}
+#app[data-dock-pos="left"] .gn-group,
+#app[data-dock-pos="right"] .gn-group,
+#app[data-dock-pos="left"] .gn-pill,
+#app[data-dock-pos="right"] .gn-pill,
+#app[data-dock-pos="left"] .gn-ink-only,
+#app[data-dock-pos="right"] .gn-ink-only {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    width: 76px;
+    gap: 2px;
+}
+#app[data-dock-pos="left"] .gn-main-tools,
+#app[data-dock-pos="right"] .gn-main-tools,
+#app[data-dock-pos="left"] .gn-settings-pill,
+#app[data-dock-pos="right"] .gn-settings-pill {
+    padding: 4px 0;
+    border-radius: 14px;
+    background: var(--hover-bg);
+}
+#app[data-dock-pos="left"] .gn-pill-divider,
+#app[data-dock-pos="right"] .gn-pill-divider {
+    flex: 0 0 100%;
+    width: 100%;
+    margin: 3px 0;
+}
+#app[data-dock-pos="left"] .gn-thickness-group,
+#app[data-dock-pos="right"] .gn-thickness-group {
+    flex-direction: row;
+    justify-content: center;
+}
+#app[data-dock-pos="left"] .gn-thickness-btn,
+#app[data-dock-pos="right"] .gn-thickness-btn { width: 24px; height: 26px; }
+#app[data-dock-pos="left"] .gn-color-group,
+#app[data-dock-pos="right"] .gn-color-group {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    width: 76px;
+    gap: 8px 7px;
+    padding: 6px 0;
+}
+
+/* Phones: one swipeable row instead of a four-row toolbar; nothing is hidden */
+@media (max-width: 600px) {
+    #app[data-dock-pos="top"] #goodnotes-top-bar,
+    #app[data-dock-pos="bottom"] #goodnotes-top-bar {
+        flex-wrap: nowrap;
+        justify-content: flex-start;
+        height: 52px !important;
+        min-height: 52px;
+        padding: 0 6px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scroll-snap-type: x proximity;
+        scrollbar-width: none;
+        overscroll-behavior-x: contain;
+        /* backdrop-filter would make position:fixed menus relative to (and clipped by) the bar */
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        background: var(--surface);
+    }
+    #app[data-dock-pos="top"] #goodnotes-top-bar::-webkit-scrollbar,
+    #app[data-dock-pos="bottom"] #goodnotes-top-bar::-webkit-scrollbar { display: none; }
+    #goodnotes-top-bar .gn-group,
+    #goodnotes-top-bar .gn-pill {
+        flex-shrink: 0;
+        flex-wrap: nowrap;
+        overflow: visible;
+        max-width: none;
+        scroll-snap-align: start;
+    }
+    #goodnotes-top-bar .gn-color-group { display: flex; }
+    /* The entrance animation leaves a transform, which would also trap fixed menus */
+    #goodnotes-top-bar.fade-in { animation: none; transform: none; }
+    /* Menus escape the scrolling bar */
+    #clear-menu {
+        position: fixed;
+        top: 68px;
+        right: 10px;
+        left: auto;
+        transform: none;
+    }
+    #app[data-dock-pos="bottom"] #clear-menu { top: auto; bottom: 72px; }
+    #export-menu,
+    #app[data-dock-pos] #export-menu {
+        position: fixed;
+        top: 68px;
+        right: 10px;
+        bottom: auto;
+        left: auto;
+        transform: none;
+    }
+    #app[data-dock-pos="bottom"] #export-menu { top: auto; bottom: 72px; }
+}
+
+/* --------------------------------------------------------------------------
+   17. Motion preferences
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+    .gn-tool-btn.active::after,
+    .gn-popover,
+    .modal-content { animation: none; }
+    .qi-scribble path,
+    .qa-stroke { animation: none; stroke-dashoffset: 0; }
+    .qa-note { animation: none; opacity: 1; }
+    .qi-sheet-front,
+    .sidebar-item,
+    .qi-cta { transition: none; }
+}

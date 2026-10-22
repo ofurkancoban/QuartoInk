@@ -54,6 +54,23 @@ Built for the **Apple Pencil** and high-resolution styluses:
 - **Dynamic Thickness Presets**: Dedicated settings for Pen and Highlighter tools (saved per-tool).
 - **Lasso Selection & Grouping**: Move or delete complex sketches as single objects.
 
+### 🗂️ Several Presentations, One Window
+Open more than one Quarto deck at the same time and switch between them with tabs above the slide.
+- Select several `.html` files in the file picker (or drop them together); each deck gets its own tab, and **+** opens another one.
+- Every deck keeps its own ink: switching saves the current deck and returns the other one to the slide where you left it (shown on the inactive tab).
+- Closing the last tab brings back the start page. Opening a deck that is already open simply switches to its tab.
+- Switching back to a deck you already opened is instant: it stays loaded on the same slide and Quarto tab. Up to four decks stay loaded; others reload when you return to them.
+- Your tabs survive a reload: open decks, ink and positions are kept in the browser's local database (IndexedDB) and come back the next time you open Quarto Ink. Closing a tab removes the deck from that list (its ink stays saved).
+- Note: open decks are held in memory, so very large exports (100 MB+) use a lot of RAM while their tab is open.
+
+### 🎨 Atelier Interface
+A paper-and-ink interface that looks annotated itself, in a warm *Paper* (light) and a *Midnight Ink* (dark) theme:
+- **Floating tool capsule** that docks to any edge; the active tool is marked with a hand-drawn circle, colours are ink drops.
+- **Dock compass**: a tiny screen map in the toolbar; click an edge to move the toolbar there.
+- **Slide ruler**: the status bar shows one tick per slide; click or drag along it to jump between slides (hover shows the slide title).
+- **Index-card navigator** with annotation counts, and a rubber-stamp badge for *Drawing* / *Navigating* mode.
+- Works offline: all fonts are bundled locally, nothing is fetched from a CDN.
+
 ---
 
 ## 🚀 Workflow & Usage
@@ -70,9 +87,12 @@ Once loaded, your presentation sits securely in an iframe.
 - **Pro Tip**: Use the `Space` bar to toggle between modes instantly.
 
 ### 3. Distribution
-Capture your brilliance using the **Export** button.
-- **Native Injection**: Quarto Ink creates a new version of your HTML file with all annotations and the rendering engine **injected directly into the source**.
-- **Self-Contained**: The exported file needs no dependencies; send it to your students or colleagues, and they will see your annotations exactly as you drew them.
+Capture your brilliance using the **Export** menu:
+- **PDF with ink**: every slide in order, with your annotations. Fragments are shown in full, and a slide with ink on several Quarto tabs gets one page per inked tab.
+- **PDF without ink**: the same pages without annotations, e.g. as a clean handout.
+- **Current slide as PNG**: the slide you are on, exactly as shown, with its ink.
+
+Slides are rendered at twice their native size, independent of your window size, with the deck's own fonts and backgrounds. Everything happens in the browser; nothing is uploaded.
 
 ---
 
@@ -91,12 +111,32 @@ Capture your brilliance using the **Export** button.
 
 ---
 
+## 🛠️ Development
+
+The Excalidraw bundle (`excalidraw-widget/dist/`) is committed, because GitHub Pages serves the site without a build step.
+After changing anything in `excalidraw-widget/`, rebuild and commit the result:
+
+```bash
+cd excalidraw-widget
+npm ci
+npm run check      # syntax-checks the build scripts
+npm run build      # rebuilds dist/ and updates the cache-busting version in ../index.html
+npx playwright install chromium   # once, for the browser tests
+npm test           # browser tests: drawing, navigation, tabs, session restore, PDF/PNG export
+QI_BROWSER=webkit npm test   # the same tests in WebKit (Safari, iPad); needs npx playwright install webkit
+```
+
+CI runs the same checks and tests, and fails if the committed `dist/` or `index.html` is out of date.
+
+---
+
 ## 🛡️ Technical Architecture
 
-- **Engine**: Pure Vanilla JS (ES6+) — Lightweight and fast.
+- **Engine**: Vanilla JS (ES6+) host app, with the Excalidraw text/shape tools bundled from `excalidraw-widget/` (React + Vite).
+- **UI layer**: `assets/ui/` holds the interface styles (`quarto-ink-ui.css`), the embedded display font (`fonts.css`) and small UI behaviours such as the slide ruler (`quarto-ink-ui.js`). `quarto-ink-export.js` renders slides for the PDF/PNG export with [html-to-image](https://github.com/bubkoo/html-to-image) (MIT, vendored in `excalidraw-widget/dist/vendor/`) and writes the PDF itself.
 - **State Management**: `Map`-based annotation storage with `slide::tab` indexing.
 - **Performance**: Double-buffered canvas drawing with `requestAnimationFrame` for artifact-free rendering.
-- **Persistence**: `localStorage` bridge ensures you can close your browser and resume your session anytime.
+- **Persistence**: annotations, open decks and the tab session are stored locally in IndexedDB (older `localStorage` data is migrated automatically), so you can close the browser and resume anytime.
 
 ---
 
