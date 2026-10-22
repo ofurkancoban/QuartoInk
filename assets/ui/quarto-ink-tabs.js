@@ -89,10 +89,11 @@
         if (!store || !doc.content) return;
         store.ready.then((ok) => {
             if (!ok) return;
+            // The HTML as text: WebKit (Safari) fails to store Blobs in IndexedDB.
             return store.putDeck(deckKey(doc), {
                 name: doc.name,
                 size: doc.size,
-                blob: new Blob([doc.content], { type: 'text/html' }),
+                html: doc.content,
                 savedAt: Date.now(),
             });
         }).catch((err) => {
@@ -567,10 +568,11 @@
             for (const key of meta.order) {
                 let rec;
                 try { rec = await store.getDeck(key); } catch (_e) { rec = null; }
-                if (!rec || !rec.blob || docs.length >= 50) continue;
+                // Older sessions stored a Blob, newer ones the HTML text.
+                if (!rec || !(rec.blob || typeof rec.html === 'string') || docs.length >= 50) continue;
                 const info = { name: rec.name, size: rec.size };
                 const doc = newDoc(info, null, { name: rec.name, size: rec.size });
-                doc.blob = rec.blob;
+                doc.blob = rec.blob || new Blob([rec.html], { type: 'text/html' });
                 doc.slide = (meta.slides && meta.slides[key]) || null;
                 doc.slideLabel = (meta.labels && meta.labels[key]) || '';
                 doc.tabScope = (meta.scopes && meta.scopes[key]) || '';

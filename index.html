@@ -3174,7 +3174,7 @@ h1, h2, h3 {
     // Presentations run in sandboxed iframes without allow-same-origin: their scripts get an
     // opaque origin and cannot reach this page (its stores, other decks). The host only talks
     // to them through postMessage.
-    var QI_DECK_SANDBOX = 'allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-downloads allow-presentation';
+    var QI_DECK_SANDBOX = 'allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-downloads';
     document.querySelectorAll('#content-frame, #zoomple-lens-iframe').forEach(function (f) {
         f.setAttribute('sandbox', QI_DECK_SANDBOX);
         f.setAttribute('allow', 'fullscreen');
