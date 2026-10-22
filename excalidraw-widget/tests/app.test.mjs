@@ -222,6 +222,52 @@ describe('Quarto Ink app', () => {
         });
     });
 
+    it('searches slide text, hidden tabs and notes', async () => {
+        await withDeck(async ({ page }) => {
+            const results = () => page.evaluate(() => [
+                document.getElementById('qi-slide-search-count').textContent,
+                [...document.querySelectorAll('#annotation-list .qi-search-result .sidebar-slide-num')].map((n) => n.textContent),
+            ]);
+            await page.keyboard.press(process.platform === 'darwin' ? 'Meta+f' : 'Control+f');
+            await page.waitForFunction(() => document.activeElement && document.activeElement.id === 'qi-slide-search');
+            // "South" is only in the Table tab of slide 2, which is not shown.
+            await page.keyboard.type('south');
+            assert.deepEqual(await results(), ['1 slide', ['2']]);
+            await page.keyboard.press('Enter');
+            await waitForSlide(page, 2);
+
+            // A note written with the Text tool on slide 4 is found too.
+            await page.evaluate(() => goToSlide(state.slides[4]));
+            await waitForSlide(page, 5);
+            const box = await (await page.$('#editor-stage')).boundingBox();
+            await page.click('#btn-text');
+            await page.mouse.click(box.x + box.width * 0.3, box.y + box.height * 0.8);
+            await page.waitForTimeout(200);
+            await page.keyboard.type('Ask about Göteborg');
+            await page.keyboard.press('Escape');
+            await page.waitForTimeout(900);
+            await page.fill('#qi-slide-search', 'goteborg');
+            assert.deepEqual(await results(), ['1 slide', ['4']]);
+            assert.equal(await page.locator('.qi-search-note').count(), 1);
+
+            await page.fill('#qi-slide-search', 'no such words');
+            assert.deepEqual(await results(), ['0 slides', []]);
+            await page.fill('#qi-slide-search', '');
+            assert.equal(await page.locator('#annotation-list .sidebar-item').count(), 5, 'all slides again');
+        });
+    });
+
+    it('takes shortcuts while the deck has focus', async () => {
+        // Regression: keys forwarded by the deck's bridge were dropped as untrusted events.
+        await withDeck(async ({ page }) => {
+            await page.click('#btn-nav-mode');
+            const frame = await (await page.$('#content-frame')).boundingBox();
+            await page.mouse.click(frame.x + frame.width / 2, frame.y + frame.height / 2);
+            await page.keyboard.press('h');
+            await page.waitForFunction(() => state.tool === 'highlighter');
+        });
+    });
+
     it('navigates with the arrows and the slide ruler', async () => {
         await withDeck(async ({ page }) => {
             const indicator = () => page.evaluate(() => document.getElementById('slide-indicator').textContent);

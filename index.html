@@ -2780,6 +2780,7 @@ h1, h2, h3 {
 <script src="assets/ui/quarto-ink-ui.js" defer></script>
 <script src="assets/ui/quarto-ink-tabs.js" defer></script>
 <script src="assets/ui/quarto-ink-export.js" defer></script>
+<script src="assets/ui/quarto-ink-search.js" defer></script>
     <script>
     (function() {
         var saved = localStorage.getItem('gn_theme');
@@ -3081,6 +3082,11 @@ h1, h2, h3 {
                 <!-- SIDEBAR -->
                 <aside id="sidebar" class="collapsed" style="display: none;">
                     <div class="sidebar-header">Slides</div>
+                    <div class="qi-search" role="search">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.2" y2="16.2"/></svg>
+                        <input type="search" id="qi-slide-search" placeholder="Search slides" aria-label="Search slides" autocomplete="off" spellcheck="false">
+                        <span class="qi-search-count" id="qi-slide-search-count" aria-live="polite"></span>
+                    </div>
                     <div class="annotation-list" id="annotation-list">
                         <!-- List items will be injected here -->
                     </div>
@@ -6438,6 +6444,9 @@ window.processFileContent = function(content, file) {
                         if (e.key === ' ' || e.code === 'Space') {
                             e.preventDefault();
                             e.stopPropagation();
+                        } else if ((e.metaKey || e.ctrlKey) && lowerKey === 'f') {
+                            // The host opens its slide search instead.
+                            e.preventDefault();
                         } else if (!e.ctrlKey && !e.metaKey && interceptKeys.includes(lowerKey)) {
                             // Prevent Reveal.js from mapping these keys (like 'p' for prev slide)
                             e.stopPropagation();
@@ -7200,6 +7209,9 @@ function updateSidebar() {
         annotationList.innerHTML = '<div style="padding:24px; color:var(--text-dim); font-size:0.82rem; text-align:center">No slides loaded.</div>';
         return;
     }
+
+    // While the search box has a query, the list shows the matching slides instead.
+    if (window.QuartoInkSearch && window.QuartoInkSearch.renderResults(annotationList)) return;
 
     state.slides.forEach(slide => {
         const slideKey = `${slide.h}-${slide.v}`;
@@ -9048,10 +9060,18 @@ function installRemountGapStrokeBuffer() {
 }
 
 function handleKeyDown(e) {
-    if (!e.isTrusted) return;
+    // Synthetic events are ignored; keys the deck's bridge forwards come from real key presses.
+    if (!e.isTrusted && !e.fromBridge) return;
 
     const key = e.key;
     const lowerKey = key.toLowerCase();
+
+    // Cmd/Ctrl+F: search the slides (the browser's find cannot see inside the deck's text well).
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && lowerKey === 'f' && state.htmlContent && window.QuartoInkSearch) {
+        if (e.preventDefault) e.preventDefault();
+        window.QuartoInkSearch.openNavigator();
+        return;
+    }
 
     // While typing (e.g. an Excalidraw text note), Space, arrows and letters belong to the text.
     const target = e.target;
