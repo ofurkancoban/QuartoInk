@@ -245,10 +245,12 @@ describe('Quarto Ink app', () => {
                 assert.ok(await page.evaluate((sel) => document.querySelector(sel).classList.contains('active'), id), id);
             }
 
-            const snapBefore = await page.evaluate(() => state.inkToShapeEnabled);
+            // Ink to Shape starts off, and turning it on is remembered.
+            const snap = () => page.evaluate(() => [state.inkToShapeEnabled, document.getElementById('btn-magic-snap').classList.contains('active')]);
+            assert.deepEqual(await snap(), [false, false]);
             await page.click('#btn-magic-snap');
-            assert.equal(await page.evaluate(() => state.inkToShapeEnabled), !snapBefore);
-            assert.equal(await page.evaluate(() => document.getElementById('btn-magic-snap').classList.contains('active')), !snapBefore);
+            assert.deepEqual(await snap(), [true, true]);
+            assert.equal(await page.evaluate(() => localStorage.getItem('gn_ink_to_shape_v2')), '1');
 
             await page.click('#btn-nav-mode');
             assert.equal(await page.evaluate(() => document.getElementById('mode-badge').textContent), 'NAVIGATING');

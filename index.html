@@ -4189,7 +4189,7 @@ const state = {
     excalidrawScenes: new Map(),
     /** Per deck slide (e.g. "0-0"): slide rect in #canvas-overlay space (see slideMetricsToOverlaySpace). */
     slideMetricsBySlide: new Map(),
-    inkToShapeEnabled: true,
+    inkToShapeEnabled: false, // off until the user turns it on
     isSnappingShape: false,
     isPointerDown: false,
     snappedElementIds: new Set(),
@@ -5258,7 +5258,7 @@ function saveToLocalStorage() {
         localStorage.setItem('gn_tool_widths', JSON.stringify(state.toolWidths));
         localStorage.setItem('gn_tool_colors', JSON.stringify(state.toolColors));
         localStorage.setItem('gn_last_thickness_index', state.thicknessIndex.toString());
-        localStorage.setItem('gn_ink_to_shape', state.inkToShapeEnabled ? '1' : '0');
+        localStorage.setItem('gn_ink_to_shape_v2', state.inkToShapeEnabled ? '1' : '0');
     } catch (e) {
         // Usually QuotaExceededError: the browser storage limit (~5 MB) is full.
         console.warn('[Storage] Failed to save annotations:', e);
@@ -5340,8 +5340,9 @@ function loadFromLocalStorage() {
             state.strokeWidth = pr[state.thicknessIndex] ?? pr[0];
         }
 
-        const inkToShape = localStorage.getItem('gn_ink_to_shape');
-        state.inkToShapeEnabled = inkToShape !== '0';
+        // New key: the old one was saved as on for everyone while on was the default,
+        // so only a choice made since it defaults to off counts.
+        state.inkToShapeEnabled = localStorage.getItem('gn_ink_to_shape_v2') === '1';
 
         let data = qiGetAnnotations(getStorageKey());
         if (!data && state.currentFileHash) {
