@@ -16,6 +16,8 @@ export default defineConfig({
         assetFileNames: 'quarto-ink-excalidraw.[ext]',
       },
     },
-    chunkSizeWarningLimit: 4500,
+    // Inline the Excalidraw UI fonts referenced by its CSS so the bundle has no absolute asset URLs.
+    assetsInlineLimit: 64 * 1024,
+    chunkSizeWarningLimit: 8000,
   },
 });

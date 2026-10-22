@@ -1,23 +1,29 @@
 {
   "name": "excalidraw-widget",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Builds the Excalidraw bundle used by Quarto Ink.",
+  "author": "ofurkancoban",
+  "license": "MIT",
+  "type": "module",
   "scripts": {
     "postinstall": "node scripts/patch-excalidraw-palette.mjs",
     "prebuild": "node scripts/patch-excalidraw-palette.mjs",
-    "build": "vite build && cp -R node_modules/@excalidraw/excalidraw/dist/excalidraw-assets dist/",
-    "dev": "vite"
+    "build": "node scripts/build.mjs",
+    "check": "node --check scripts/build.mjs && node --check scripts/patch-excalidraw-palette.mjs && node --check ../assets/ui/quarto-ink-ui.js && node --check ../assets/ui/quarto-ink-tabs.js && node --check ../assets/ui/quarto-ink-store.js && node --check ../assets/ui/quarto-ink-export.js",
+    "dev": "vite",
+    "test:draw": "node test_drawing.mjs",
+    "test": "node --test --test-concurrency=1 tests/app.test.mjs tests/tabs.test.mjs tests/session.test.mjs tests/ui.test.mjs tests/export.test.mjs"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "module",
   "dependencies": {
-    "@excalidraw/excalidraw": "^0.17.6",
-    "@vitejs/plugin-react": "^4.7.0",
+    "@excalidraw/excalidraw": "0.18.1",
+    "html-to-image": "1.11.13",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "playwright": "^1.61.1",
+    "reveal.js": "^5.1.0",
     "vite": "^5.4.21"
   }
 }
