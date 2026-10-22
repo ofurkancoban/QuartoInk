@@ -373,6 +373,49 @@
     // Interactive parts of a deck that are not part of the slide (Quarto's PDF leaves them out too).
     const UI_ONLY = '.controls, .progress, .slide-menu-button, .pause-overlay, .playback, .slide-chalkboard-buttons, .aria-status, .speaker-notes';
 
+    // Text that is in the DOM but not on the page.
+    const HIDDEN_TEXT = 'script, style, noscript, template, mjx-assistive-mml, .sr-only, .visually-hidden';
+
+    /**
+     * The visible words under `roots` with their boxes on the page (page px), for the PDF's
+     * invisible text layer that makes the text selectable and searchable.
+     */
+    function collectWords(win, roots, width, height) {
+        const doc = win.document;
+        const visible = new Map();
+        const isVisible = (el) => {
+            if (!el || el === doc.body || el === doc.documentElement) return true;
+            if (visible.has(el)) return visible.get(el);
+            let ok = !el.matches(HIDDEN_TEXT) && !el.matches(UI_ONLY);
+            if (ok) {
+                const cs = win.getComputedStyle(el);
+                ok = cs.display !== 'none' && cs.visibility !== 'hidden' && parseFloat(cs.opacity) > 0.05 && isVisible(el.parentElement);
+            }
+            visible.set(el, ok);
+            return ok;
+        };
+        const words = [];
+        const range = doc.createRange();
+        for (const root of roots) {
+            const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                const text = node.nodeValue;
+                if (!text || !text.trim() || !isVisible(node.parentElement)) continue;
+                const re = /\S+/g;
+                let m;
+                while ((m = re.exec(text))) {
+                    range.setStart(node, m.index);
+                    range.setEnd(node, m.index + m[0].length);
+                    const r = range.getClientRects()[0];
+                    if (!r || r.width < 1 || r.height < 2) continue;
+                    if (r.right <= 0 || r.bottom <= 0 || r.left >= width || r.top >= height) continue;
+                    words.push({ text: m[0], x: r.left, y: r.top, width: r.width, height: r.height });
+                }
+            }
+        }
+        return words;
+    }
+
     /**
      * Render the current slide, in print layout, as a canvas of this page: the whole page of the
      * deck (backgrounds, logo, footer, navigation bars of extensions, ...) with only the current
@@ -437,9 +480,15 @@
             qiRoot: body,
         });
         ctx.drawImage(content, 0, 0, canvas.width, canvas.height);
+        let words = [];
+        try {
+            words = collectWords(win, [slideEl, ...chrome], width, height);
+        } catch (e) {
+            console.warn('[QuartoInkExport] text layer', e);
+        }
         // Where the slide sits on the page (in page px): the ink is mapped onto this box.
         const b = reveal.getSlidesElement().getBoundingClientRect();
-        return { canvas, width, height, slideRect: { x: b.left, y: b.top, width: b.width, height: b.height } };
+        return { canvas, width, height, words, slideRect: { x: b.left, y: b.top, width: b.width, height: b.height } };
     }
 
     function svgToImage(svg, width, height) {
@@ -603,7 +652,54 @@
         return `(D:${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())})`;
     }
 
-    /** pages: [{ jpeg: Uint8Array, pixelWidth, pixelHeight, width, height }] (width/height in CSS px). */
+    // Invisible text layer: a font without glyphs whose codes are Unicode code points
+    // (Identity-H, two bytes per character), so viewers can select, search and copy the text.
+    const TEXT_ADVANCE = 0.5; // advance of every character, in em (the font's /DW 500)
+
+    function toUnicodeCMap() {
+        const ranges = [];
+        for (let hi = 0; hi < 256; hi++) {
+            if (hi >= 0xd8 && hi <= 0xdf) continue; // surrogates
+            const h = hi.toString(16).padStart(2, '0').toUpperCase();
+            ranges.push(`<${h}00> <${h}FF> <${h}00>`);
+        }
+        let blocks = '';
+        for (let i = 0; i < ranges.length; i += 100) {
+            const part = ranges.slice(i, i + 100);
+            blocks += `${part.length} beginbfrange\n${part.join('\n')}\nendbfrange\n`;
+        }
+        return '/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n'
+            + '/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n'
+            + '/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n'
+            + '1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n'
+            + blocks
+            + 'endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend';
+    }
+
+    /** Content stream operators for the invisible words of a page (page px -> PDF pt, y up). */
+    function textLayer(words, pageHeight) {
+        let out = 'BT\n3 Tr\n';
+        for (const word of words) {
+            let hex = '';
+            for (const ch of word.text) {
+                const code = ch.codePointAt(0);
+                hex += (code > 0xffff || (code >= 0xd800 && code <= 0xdfff) ? 0xfffd : code).toString(16).padStart(4, '0');
+            }
+            const count = hex.length / 4;
+            // Glyph height ~ the line box, baseline near its bottom.
+            const size = word.height * PX_TO_PT * 0.8;
+            const x = word.x * PX_TO_PT;
+            const y = (pageHeight - word.y - word.height * 0.78) * PX_TO_PT;
+            const scale = (100 * word.width * PX_TO_PT) / (count * TEXT_ADVANCE * size);
+            out += `/F1 ${size.toFixed(2)} Tf ${scale.toFixed(2)} Tz 1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm <${hex.toUpperCase()}> Tj\n`;
+        }
+        return `${out}ET\n`;
+    }
+
+    /**
+     * pages: [{ jpeg: Uint8Array, pixelWidth, pixelHeight, width, height, words? }] (width/height
+     * in CSS px; words from collectWords, drawn as invisible text over the page image).
+     */
     function buildPdf(pages, title) {
         const encoder = new TextEncoder();
         const chunks = [];
@@ -623,6 +719,9 @@
 
         write('%PDF-1.4\n%âãÏÓ\n');
         const pageNum = (i) => 4 + i * 3;
+        // Shared font of the text layer, after the pages.
+        const fontNum = pageNum(pages.length);
+        const hasText = pages.some((page) => page.words && page.words.length);
         object(1, '<< /Type /Catalog /Pages 2 0 R >>');
         object(2, `<< /Type /Pages /Count ${pages.length} /Kids [${pages.map((_p, i) => `${pageNum(i)} 0 R`).join(' ')}] >>`);
         object(3, `<< /Title ${pdfTextString(title)} /Producer (Quarto Ink) /CreationDate ${pdfDate(new Date())} >>`);
@@ -630,14 +729,23 @@
             const w = (page.width * PX_TO_PT).toFixed(2);
             const h = (page.height * PX_TO_PT).toFixed(2);
             const n = pageNum(i);
-            const draw = `q\n${w} 0 0 ${h} 0 0 cm\n/Im0 Do\nQ\n`;
-            object(n, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${w} ${h}] /Resources << /XObject << /Im0 ${n + 2} 0 R >> >> /Contents ${n + 1} 0 R >>`);
+            const words = page.words || [];
+            const draw = `q\n${w} 0 0 ${h} 0 0 cm\n/Im0 Do\nQ\n${words.length ? textLayer(words, page.height) : ''}`;
+            const font = words.length ? ` /Font << /F1 ${fontNum} 0 R >>` : '';
+            object(n, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${w} ${h}] /Resources << /XObject << /Im0 ${n + 2} 0 R >>${font} >> /Contents ${n + 1} 0 R >>`);
             object(n + 1, `<< /Length ${encoder.encode(draw).length} >>\nstream\n${draw}endstream`);
             object(n + 2,
                 `<< /Type /XObject /Subtype /Image /Width ${page.pixelWidth} /Height ${page.pixelHeight} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${page.jpeg.length} >>\nstream\n`,
                 page.jpeg,
                 '\nendstream');
         });
+        if (hasText) {
+            const cmap = toUnicodeCMap();
+            object(fontNum, `<< /Type /Font /Subtype /Type0 /BaseFont /QuartoInkText /Encoding /Identity-H /DescendantFonts [${fontNum + 1} 0 R] /ToUnicode ${fontNum + 3} 0 R >>`);
+            object(fontNum + 1, `<< /Type /Font /Subtype /CIDFontType2 /BaseFont /QuartoInkText /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor ${fontNum + 2} 0 R /DW ${TEXT_ADVANCE * 1000} /CIDToGIDMap /Identity >>`);
+            object(fontNum + 2, '<< /Type /FontDescriptor /FontName /QuartoInkText /Flags 4 /FontBBox [0 -200 1000 800] /ItalicAngle 0 /Ascent 800 /Descent -200 /CapHeight 700 /StemV 80 >>');
+            object(fontNum + 3, `<< /Length ${encoder.encode(cmap).length} >>\nstream\n${cmap}\nendstream`);
+        }
 
         const count = offsets.length;
         const xref = length;
@@ -790,7 +898,7 @@
                     const jpeg = canvasToBlob(page.canvas, 'image/jpeg', JPEG_QUALITY)
                         .then(async (blob) => new Uint8Array(await blob.arrayBuffer()));
                     jpeg.catch(() => {}); // reported when awaited; ignored after a cancel
-                    pages.push({ jpeg, pixelWidth: page.canvas.width, pixelHeight: page.canvas.height, width: page.width, height: page.height });
+                    pages.push({ jpeg, pixelWidth: page.canvas.width, pixelHeight: page.canvas.height, width: page.width, height: page.height, words: page.words });
                 }
             }
             if (!current.cancelled) {

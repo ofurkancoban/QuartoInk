@@ -175,6 +175,12 @@ describe('PDF and PNG export', () => {
             assert.match(pdf.text, /\/MediaBox \[0 0 720\.00 525\.00\]/);
             const title = Array.from('Ethnic Diversity in Europe', (c) => c.charCodeAt(0).toString(16).padStart(4, '0')).join('');
             assert.ok(pdf.text.includes(`/Title <FEFF${title.toUpperCase()}>`), 'deck title as PDF title');
+            // Invisible text layer: words as Unicode code points, mapped back by a ToUnicode CMap.
+            const hex = (word) => Array.from(word, (c) => c.codePointAt(0).toString(16).padStart(4, '0')).join('').toUpperCase();
+            assert.match(pdf.text, /\/Encoding \/Identity-H .*\/ToUnicode/);
+            for (const word of ['Conclusion', 'Diversity', 'North']) {
+                assert.ok(pdf.text.includes(`<${hex(word)}> Tj`), `"${word}" is selectable text`);
+            }
 
             // Page 2 is the Chart tab, page 3 the Table tab with its ink.
             const chart = await imageStats(page, jpegUrl(pdf.pages[1]));
