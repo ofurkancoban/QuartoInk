@@ -1,7 +1,7 @@
 // Core app behaviour in a real browser: loading, drawing, navigation, toolbar, export.
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startServer, fixture, launch, openApp, waitForDeck, openDecks, drawStroke, appInfo } from './helpers.mjs';
+import { startServer, fixture, launch, openApp, waitForDeck, waitForSlide, openDecks, drawStroke, appInfo } from './helpers.mjs';
 
 describe('Quarto Ink app', () => {
     let server;
@@ -152,9 +152,10 @@ describe('Quarto Ink app', () => {
             await page.keyboard.press('Escape');
             await page.waitForTimeout(300);
             assert.deepEqual(await texts(), ['Hello noXte', 'Second one']);
-            const sizes = await page.evaluate(() => window.QuartoInkExcalidraw.getAPI().getSceneElements()
-                .filter((e) => e.type === 'text').map((e) => e.fontSize));
-            assert.deepEqual(sizes, [28, 28], 'notes start at the larger default size');
+            const styles = await page.evaluate(() => window.QuartoInkExcalidraw.getAPI().getSceneElements()
+                .filter((e) => e.type === 'text').map((e) => [e.fontSize, e.fontFamily]));
+            // Large size, "Normal" sans font (Excalidraw FONT_FAMILY.Nunito = 6)
+            assert.deepEqual(styles, [[28, 6], [28, 6]], 'notes start large, in the sans font');
             // The note being typed looks like the finished note: same font smoothing, and not
             // inverted by Excalidraw's dark theme (black text was near-white while typing).
             await page.click('#btn-theme');
@@ -169,6 +170,55 @@ describe('Quarto Ink app', () => {
             await page.keyboard.press('Escape');
             const info = await page.evaluate(() => ({ slide: state.currentSlide, drawing: state.isDrawingMode, tool: state.tool }));
             assert.deepEqual(info, { slide: '0-0', drawing: true, tool: 'text' });
+        });
+    });
+
+    it('sizes text from the toolbar, also the note being typed, and keeps it on the next slide', async () => {
+        await withDeck(async ({ page }) => {
+            const box = await (await page.$('#editor-stage')).boundingBox();
+            await page.click('#btn-text');
+            await page.waitForTimeout(300);
+            assert.equal(await page.locator('.gn-thickness-group.is-text-size').count(), 1, 'size buttons in text mode');
+            await page.mouse.click(box.x + box.width * 0.3, box.y + box.height * 0.6);
+            await page.waitForTimeout(200);
+            await page.keyboard.type('Grow');
+            await page.click('.gn-thickness-btn[data-index="2"]');
+            await page.waitForTimeout(300);
+            await page.keyboard.type('n');
+            await page.keyboard.press('Escape');
+            await page.waitForTimeout(300);
+            const sizeOf = () => page.evaluate(() => window.QuartoInkExcalidraw.getAPI().getSceneElements()
+                .filter((e) => e.type === 'text').map((e) => [e.text, e.fontSize]));
+            assert.deepEqual(await sizeOf(), [['Grown', 36]], 'the note kept being typed and grew');
+
+            await page.evaluate(() => goToSlide(state.slides[1]));
+            await waitForSlide(page, 2);
+            await page.mouse.click(box.x + box.width * 0.3, box.y + box.height * 0.85);
+            await page.waitForTimeout(200);
+            await page.keyboard.type('next');
+            await page.keyboard.press('Escape');
+            await page.waitForTimeout(300);
+            assert.deepEqual(await sizeOf(), [['next', 36]]);
+
+            await page.click('#btn-pen');
+            assert.equal(await page.locator('.gn-thickness-group.is-text-size').count(), 0, 'stroke buttons again');
+        });
+    });
+
+    it('keeps a shape tool active for several shapes', async () => {
+        // Regression: Excalidraw fell back to selection after one shape while the toolbar still showed the tool.
+        await withDeck(async ({ page }) => {
+            const box = await (await page.$('#editor-stage')).boundingBox();
+            await page.click('#btn-rect');
+            for (const [x, y] of [[0.15, 0.2], [0.55, 0.5]]) {
+                await page.mouse.move(box.x + box.width * x, box.y + box.height * y);
+                await page.mouse.down();
+                await page.mouse.move(box.x + box.width * (x + 0.2), box.y + box.height * (y + 0.2), { steps: 5 });
+                await page.mouse.up();
+                await page.waitForTimeout(300);
+            }
+            const types = await page.evaluate(() => window.QuartoInkExcalidraw.getAPI().getSceneElements().map((e) => e.type));
+            assert.deepEqual(types, ['rectangle', 'rectangle']);
         });
     });
 

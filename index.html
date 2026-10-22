@@ -1286,6 +1286,25 @@ h1, h2, h3 {
     background-color: var(--text);
 }
 
+/* With the Text tool the three buttons pick the text size: an "A" in three sizes. */
+.gn-thickness-group.is-text-size .gn-thickness-line {
+    display: none;
+}
+.gn-thickness-group.is-text-size .gn-thickness-btn::after {
+    content: 'A';
+    font-family: var(--qi-font-ui, system-ui, sans-serif);
+    font-weight: 600;
+    line-height: 1;
+    color: var(--text-ghost);
+}
+.gn-thickness-group.is-text-size .gn-thickness-btn.active::after,
+.gn-thickness-group.is-text-size .gn-thickness-btn:hover::after {
+    color: var(--text);
+}
+.gn-thickness-group.is-text-size .gn-thickness-btn[data-index="0"]::after { font-size: 11px; }
+.gn-thickness-group.is-text-size .gn-thickness-btn[data-index="1"]::after { font-size: 15px; }
+.gn-thickness-group.is-text-size .gn-thickness-btn[data-index="2"]::after { font-size: 19px; }
+
 /* Text Tool Settings */
 .gn-text-group {
     display: flex;
@@ -3987,7 +4006,43 @@ function syncColorUI() {
 }
 
 // Sync thickness button UI to match current strokeWidth and presets
+// Text sizes behind the three size buttons when the Text tool is active (Excalidraw M, L, XL).
+const TEXT_SIZE_PRESETS = [20, 28, 36];
+const TEXT_SIZE_LABELS = ['Medium text', 'Large text', 'Extra large text'];
+const STROKE_LABELS = ['Thin stroke', 'Medium stroke', 'Thick stroke'];
+
+function isTextSizeMode() {
+    return state.tool === 'text' && state.annotationEngine === 'excalidraw';
+}
+
+function syncTextSizeUI() {
+    const api = window.QuartoInkExcalidraw;
+    const size = api && typeof api.getTextFontSize === 'function' ? api.getTextFontSize() : TEXT_SIZE_PRESETS[1];
+    _$$('.gn-thickness-btn').forEach((btn) => {
+        const idx = parseInt(btn.dataset.index, 10);
+        btn.style.display = '';
+        btn.disabled = false;
+        btn.setAttribute('aria-disabled', 'false');
+        btn.classList.toggle('active', TEXT_SIZE_PRESETS[idx] === size);
+        btn.setAttribute('aria-label', TEXT_SIZE_LABELS[idx]);
+        btn.title = TEXT_SIZE_LABELS[idx];
+    });
+}
+
 function syncThicknessUI() {
+    const group = _$('.gn-thickness-group');
+    const textMode = isTextSizeMode();
+    if (group) group.classList.toggle('is-text-size', textMode);
+    if (textMode) {
+        if (group) group.classList.remove('is-disabled');
+        syncTextSizeUI();
+        return;
+    }
+    _$$('.gn-thickness-btn').forEach((btn) => {
+        const idx = parseInt(btn.dataset.index, 10);
+        btn.setAttribute('aria-label', STROKE_LABELS[idx]);
+        btn.title = STROKE_LABELS[idx];
+    });
     const presets = getActiveThicknessPresets();
     const eraserLocked = state.tool === 'eraser';
     let bestIdx = 0;
@@ -4017,7 +4072,6 @@ function syncThicknessUI() {
     const label = _$('#thickness-val');
     if (slider) slider.value = state.strokeWidth;
     if (label) label.textContent = `${state.strokeWidth}pt`;
-    const group = _$('.gn-thickness-group');
     if (group) group.classList.toggle('is-disabled', eraserLocked);
     if (slider) slider.disabled = eraserLocked;
     _$$('.gn-thickness-btn').forEach((btn) => {
@@ -4560,7 +4614,7 @@ function loadScriptOnce(src) {
 
 async function ensureExcalidrawRuntime() {
     window.EXCALIDRAW_ASSET_PATH = new URL('excalidraw-widget/dist/', window.location.href).href;
-    const src = 'excalidraw-widget/dist/quarto-ink-excalidraw.js?v=c26b7e7dee';
+    const src = 'excalidraw-widget/dist/quarto-ink-excalidraw.js?v=906686017c';
     const vm = src.match(/[?&]v=([^&]+)/);
     const wantV = vm ? vm[1] : '';
     const ok =
@@ -8795,8 +8849,20 @@ function setupEventListeners() {
         }
     });
 
+    // The text size may also change in Excalidraw's panel.
+    window.addEventListener('quartoink:textstyle', () => { if (isTextSizeMode()) syncTextSizeUI(); });
     _$$('.gn-thickness-btn').forEach(btn => {
+        // Keep the focus in a note being typed, so a text size click resizes that note.
+        btn.addEventListener('mousedown', (e) => { if (isTextSizeMode()) e.preventDefault(); });
         btn.onclick = () => {
+            if (isTextSizeMode()) {
+                const size = TEXT_SIZE_PRESETS[parseInt(btn.dataset.index, 10)];
+                if (size && window.QuartoInkExcalidraw && typeof window.QuartoInkExcalidraw.setTextFontSize === 'function') {
+                    window.QuartoInkExcalidraw.setTextFontSize(size);
+                }
+                syncTextSizeUI();
+                return;
+            }
             if (state.tool === 'eraser') return;
             const presets = getActiveThicknessPresets();
             const idx = parseInt(btn.dataset.index, 10);

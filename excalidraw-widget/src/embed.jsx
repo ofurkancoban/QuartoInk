@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 
 import { createRoot } from 'react-dom/client';
 import {
   Excalidraw,
+  FONT_FAMILY,
   MainMenu,
   newElementWith,
   restore,
@@ -348,6 +349,7 @@ function syncStateFromHost(iframeRef, props) {
           currentItemRoughness: DEFAULT_ROUGHNESS,
           currentItemOpacity: parsed.initOpacity,
           currentItemFontSize: activeTextFontSize,
+          currentItemFontFamily: activeTextFontFamily,
           activeTool: getExcalToolObject(activeQuartoTool),
           openMenu: preserveMenu,
           selectedElementIds: {},
@@ -422,10 +424,25 @@ let quartoInkRoot = null;
 let currentExcalAPI = null;
 let activeToolbarStrokeColor = PURE_BLACK_COLOR;
 let activeToolbarStrokeWidth = 2;
-// Size of new text notes: Excalidraw's "L" (its default "M", 20, is small on a slide). Kept
-// across slides, which each mount a new Excalidraw, once the user picks another size.
+// Size and font of new text notes: Excalidraw's "L" (its default "M", 20, is small on a slide)
+// in its "Normal" sans font, which reads better on slides than the hand-drawn one. Kept across
+// slides, which each mount a new Excalidraw, once the user picks others in the panel or toolbar.
 const DEFAULT_TEXT_FONT_SIZE = 28;
 let activeTextFontSize = DEFAULT_TEXT_FONT_SIZE;
+let activeTextFontFamily = FONT_FAMILY.Nunito;
+// Excalidraw's size presets and the radio inputs of its panel that apply them.
+const TEXT_SIZE_INPUTS = { 16: "fontSize-small", 20: "fontSize-medium", 28: "fontSize-large", 36: "fontSize-veryLarge" };
+
+/** Remember the text size and font the user picked in the current Excalidraw. */
+function rememberTextStyle() {
+  try {
+    const appState = excalidrawRootRef.current?.getAppState();
+    const size = appState?.currentItemFontSize;
+    const family = appState?.currentItemFontFamily;
+    if (typeof size === 'number' && Number.isFinite(size) && size > 0) activeTextFontSize = size;
+    if (typeof family === 'number' && Number.isFinite(family)) activeTextFontFamily = family;
+  } catch {}
+}
 
 function normalizeStrokeWidth(val) {
   const num = Number(val);
@@ -631,10 +648,11 @@ const QUARTO_TO_EXCALIDRAW_TOOL_MAP = {
   pen: { type: "freedraw" },
   highlighter: { type: "freedraw" },
   eraser: { type: "eraser" },
-  rect: { type: "rectangle" },
-  circle: { type: "ellipse" },
-  arrow: { type: "arrow" },
-  // Locked: Excalidraw would fall back to selection after one note, while the toolbar still shows Text.
+  // Locked: Excalidraw would fall back to selection after one shape or note, while the
+  // toolbar still shows the tool, so the next drag would select instead of draw.
+  rect: { type: "rectangle", locked: true },
+  circle: { type: "ellipse", locked: true },
+  arrow: { type: "arrow", locked: true },
   text: { type: "text", locked: true },
   image: { type: "image" },
   laser: { type: "laser" }
@@ -670,6 +688,7 @@ function ExcalidrawWidget(props) {
         currentItemRoughness: DEFAULT_ROUGHNESS,
         currentItemOpacity: initOpacity,
         currentItemFontSize: activeTextFontSize,
+        currentItemFontFamily: activeTextFontFamily,
         activeTool: getExcalToolObject(initialQuartoTool)
       },
       files: {}
@@ -693,6 +712,7 @@ function ExcalidrawWidget(props) {
           currentItemRoughness: DEFAULT_ROUGHNESS,
           currentItemOpacity: initOpacity,
           currentItemFontSize: activeTextFontSize,
+          currentItemFontFamily: activeTextFontFamily,
           activeTool: getExcalToolObject(initialQuartoTool)
         },
         files: restored.files || {}
@@ -915,22 +935,25 @@ function ExcalidrawWidget(props) {
     return () => host.removeEventListener('wheel', onWheel, { capture: true });
   }, []);
 
-  // Remember the text size picked in the panel (S / M / L / XL) for the next slides, which each
-  // mount a new Excalidraw. onChange is not reliably called for this appState-only change.
+  // Remember the text size and font picked in the panel for the next slides, which each mount a
+  // new Excalidraw. onChange is not reliably called for these appState-only changes.
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return undefined;
-    const onSizeChange = (e) => {
-      if (!(e.target instanceof HTMLInputElement) || e.target.name !== "font-size") return;
-      setTimeout(() => {
-        try {
-          const size = excalidrawRootRef.current?.getAppState().currentItemFontSize;
-          if (typeof size === 'number' && Number.isFinite(size) && size > 0) activeTextFontSize = size;
-        } catch {}
-      }, 0);
+    const onPanelInput = (e) => {
+      if (!(e.target instanceof Element) || !e.target.closest('.selected-shape-actions, .FontPicker__container, [data-testid^="font-family-"]')) return;
+      // A font change is applied after its font has loaded, so read again a little later.
+      [0, 250, 800].forEach((delay) => setTimeout(() => {
+        rememberTextStyle();
+        window.dispatchEvent(new CustomEvent('quartoink:textstyle'));
+      }, delay));
     };
-    host.addEventListener('change', onSizeChange, true);
-    return () => host.removeEventListener('change', onSizeChange, true);
+    host.addEventListener('change', onPanelInput, true);
+    host.addEventListener('click', onPanelInput, true);
+    return () => {
+      host.removeEventListener('change', onPanelInput, true);
+      host.removeEventListener('click', onPanelInput, true);
+    };
   }, []);
 
   const onChange = useCallback((elements, appState, files) => {
@@ -1196,6 +1219,27 @@ function getAPI() {
   return excalidrawRootRef.current;
 }
 
+function getTextFontSize() {
+  return activeTextFontSize;
+}
+
+/**
+ * Text size from the host toolbar. Goes through Excalidraw's own size control, so a selected
+ * note or the note being typed changes too, as with the panel.
+ */
+function setTextFontSize(size) {
+  if (!TEXT_SIZE_INPUTS[size]) return;
+  activeTextFontSize = size;
+  const input = document.querySelector(`#excalidraw-host [data-testid="${TEXT_SIZE_INPUTS[size]}"]`);
+  if (input) {
+    input.click();
+  } else {
+    try {
+      excalidrawRootRef.current?.updateScene({ appState: { currentItemFontSize: size }, commitToHistory: false });
+    } catch {}
+  }
+}
+
 function setExcalidrawShapeMenuOpen(open) {
   const api = excalidrawRootRef.current;
   if (!api) return;
@@ -1448,6 +1492,8 @@ window.QuartoInkExcalidraw = {
   captureSceneSerialized,
   exportSerializedToSvg,
   getAPI,
+  getTextFontSize,
+  setTextFontSize,
   syncQuartoToolFromHost,
   applyQuartoTool,
   setExcalidrawShapeMenuOpen,
