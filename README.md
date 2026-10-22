@@ -85,12 +85,20 @@ Once loaded, your presentation runs in a sandboxed iframe: its scripts cannot re
 - Use **Drawing Mode** (Canvas Overlay) to sketch.
 - Use **Navigation Mode** to interact with links or advance fragments.
 - **Pro Tip**: Use the `Space` bar to toggle between modes instantly.
+- **Blank pages**: press `B` (or **+ page** in the slide navigator) for a blank page after the slide, plain, grid or lined, for derivations and questions. `Next`/`Prev` step through them.
+- **Notes and search**: write your own notes per slide at the bottom of the navigator, and find any slide by its text, your notes or your text ink with `⌘F` / `Ctrl+F`.
 
-### 3. Distribution
+### 3. Teaching
+- **Audience window**: the screen button opens a second window for the projector with just the slide and your ink, updated live. A clicker or the arrow keys there move the presentation.
+- **Record the lecture**: the record button captures the slides, your ink and the microphone into a video file (in Chrome cropped to the slide area). It is saved when you stop.
+
+### 4. Distribution
 Capture your brilliance using the **Export** menu:
 - **PDF with ink**: every slide in order, with your annotations. Fragments are shown in full, and a slide with Quarto tabs gets one page per tab. Under "Tabs in the PDF" you can instead keep only the tabs with ink, or only the tab each slide shows.
 - **PDF without ink**: the same pages without annotations, e.g. as a clean handout.
 - **Current slide as PNG**: the slide you are on, exactly as shown, with its ink.
+- **Deck with ink (.html)**: one file to share. In a browser it is the plain deck; opened in Quarto Ink it brings your ink, notes and blank pages along.
+- **Include my notes**: adds your notes below their slide in the PDF.
 
 Slides are rendered at twice their native size, independent of your window size, with the deck's own fonts and backgrounds. The text of every PDF page stays selectable and searchable. Everything happens in the browser; nothing is uploaded.
 

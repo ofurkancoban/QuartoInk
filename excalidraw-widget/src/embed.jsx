@@ -1117,15 +1117,28 @@ function ExcalidrawWidget(props) {
   );
 }
 
+/**
+ * Drop the React root. React can find its DOM already changed while unmounting (WebKit throws
+ * NotFoundError from removeChild); the root is dropped anyway and its container emptied, so the
+ * next mount starts clean instead of the error aborting the slide or page switch.
+ */
+function releaseRoot() {
+  if (!quartoInkRoot) return;
+  const container = activeIframeRef;
+  try {
+    quartoInkRoot.unmount();
+  } catch {
+    if (container) container.replaceChildren();
+  }
+  quartoInkRoot = null;
+}
+
 function mount(container, props) {
   if (!container) return;
   activeSerializedChangeCallback = props?.onSerializedChange;
 
   if (!syncStateFromHost(container, props)) {
-    if (quartoInkRoot) {
-      quartoInkRoot.unmount();
-      quartoInkRoot = null;
-    }
+    releaseRoot();
     excalidrawRootRef.current = null;
     currentExcalAPI = null;
     isEraserActive = false;
@@ -1183,10 +1196,7 @@ function unmount() {
     clearTimeout(debouncedSaveTimer);
     debouncedSaveTimer = null;
   }
-  if (quartoInkRoot) {
-    quartoInkRoot.unmount();
-    quartoInkRoot = null;
-  }
+  releaseRoot();
   excalidrawRootRef.current = null;
   currentExcalAPI = null;
   activeIframeRef = null;

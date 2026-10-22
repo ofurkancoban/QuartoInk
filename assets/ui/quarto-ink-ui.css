@@ -770,6 +770,24 @@ button.gn-color-swatch:focus-visible,
     font-size: 0.68rem;
     color: var(--text-dim);
 }
+/* Recording: a red dot that pulses, with the running time */
+#btn-record { position: relative; }
+#btn-record .qi-record-dot { color: var(--text-muted); }
+#btn-record.recording { color: var(--danger); }
+#btn-record.recording .qi-record-dot { color: var(--danger); animation: qi-record-pulse 1.2s ease-in-out infinite; }
+@keyframes qi-record-pulse { 50% { opacity: 0.35; } }
+.qi-record-time {
+    position: absolute;
+    top: calc(100% + 2px);
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: var(--qi-font-mono);
+    font-size: 0.62rem;
+    color: var(--danger);
+    white-space: nowrap;
+    pointer-events: none;
+}
+
 /* Blank pages: a paper sheet over the deck, its toolbar, and their entries in the navigator */
 #qi-whiteboard {
     display: none;

@@ -2785,6 +2785,7 @@ h1, h2, h3 {
 <script src="assets/ui/quarto-ink-whiteboard.js" defer></script>
 <script src="assets/ui/quarto-ink-audience.js" defer></script>
 <script src="assets/ui/quarto-ink-share.js" defer></script>
+<script src="assets/ui/quarto-ink-recorder.js" defer></script>
     <script>
     (function() {
         var saved = localStorage.getItem('gn_theme');
@@ -2968,6 +2969,10 @@ h1, h2, h3 {
                 </div>
                 <button class="gn-btn" id="btn-sidebar-toggle" title="Toggle Navigator (N)">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+                </button>
+                <button class="gn-btn" id="btn-record" type="button" title="Record the lecture (slides, ink and microphone)" aria-label="Record the lecture" aria-pressed="false">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><circle class="qi-record-dot" cx="12" cy="12" r="4" fill="currentColor" stroke="none"/></svg>
+                    <span class="qi-record-time" aria-hidden="true"></span>
                 </button>
                 <button class="gn-btn" id="btn-audience" type="button" title="Audience window (for a projector)" aria-label="Audience window" aria-pressed="false">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4" width="19" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/><path d="M9 10.5l2 2 4-4.5"/></svg>
@@ -4655,7 +4660,7 @@ function loadScriptOnce(src) {
 
 async function ensureExcalidrawRuntime() {
     window.EXCALIDRAW_ASSET_PATH = new URL('excalidraw-widget/dist/', window.location.href).href;
-    const src = 'excalidraw-widget/dist/quarto-ink-excalidraw.js?v=906686017c';
+    const src = 'excalidraw-widget/dist/quarto-ink-excalidraw.js?v=9f5ad4e30a';
     const vm = src.match(/[?&]v=([^&]+)/);
     const wantV = vm ? vm[1] : '';
     const ok =
@@ -6537,6 +6542,8 @@ window.processFileContent = function(content, file) {
                         if (!e.ctrlKey && !e.metaKey && !e.altKey && lockKeys[lowerKey] && window.__qiNavLock && window.__qiNavLock[lockKeys[lowerKey]]) {
                             e.preventDefault();
                             e.stopImmediatePropagation();
+                            window.parent.postMessage({ type: 'NAV_REQUEST', dir: lockKeys[lowerKey] === 'next' ? 'Next' : 'Prev' }, QI_PARENT_ORIGIN);
+                            return;
                         }
                         
                         if (e.key === ' ' || e.code === 'Space') {
@@ -6887,6 +6894,8 @@ window.addEventListener('message', e => {
         return;
     }
     if (e.data.type === 'FRAGMENT_CHANGED') {
+        // Reveal handled the forwarded nav key by showing a fragment.
+        clearTimeout(state._bridgeNavTimer);
         state.currentFragment = typeof e.data.indexf === 'number' ? e.data.indexf : null;
         if (e.data.fragments) state.fragmentsAvailable = e.data.fragments;
         if (window.QuartoInkWhiteboard) window.QuartoInkWhiteboard.render();
@@ -7038,7 +7047,10 @@ function applyTabChangeMessage(data) {
 
 /** Slide / Quarto-tab change reported by the bridge (SLIDE_CHANGED or INIT_STATE). */
 function applySlideChangeMessage(data) {
-    clearTimeout(state._bridgeNavTimer);
+    // A nav key forwarded from the deck was handled by Reveal if the slide changed; other
+    // messages (e.g. a tab or class change) must not cancel it.
+    const changedTo = `${data.indexh != null ? data.indexh : 0}-${data.indexv != null ? data.indexv : 0}`;
+    if (changedTo !== state.currentSlide) clearTimeout(state._bridgeNavTimer);
     if ('indexf' in data) state.currentFragment = typeof data.indexf === 'number' ? data.indexf : null;
     if (data.fragments) state.fragmentsAvailable = data.fragments;
     qiDebug('[Parent] Received', data.type, 'h:', data.indexh, 'v:', data.indexv, 'engine:', state.annotationEngine, 'drawingMode:', state.isDrawingMode, 'currentSlide:', state.currentSlide);

@@ -98,6 +98,21 @@ describe('Deck isolation', () => {
         });
     });
 
+    it('steps one fragment per arrow key while the deck has the keyboard', async () => {
+        // Reveal shows the fragment; the key forwarded to the app must not step again.
+        await withDeck('notes.html', deckB, async ({ page }) => {
+            await page.evaluate(() => goToSlide(state.slides[4]));
+            await waitForSlide(page, 5);
+            await page.click('#btn-nav-mode');
+            const frame = await (await page.$('#content-frame')).boundingBox();
+            await page.mouse.click(frame.x + frame.width / 2, frame.y + frame.height * 0.2);
+            await page.keyboard.press('ArrowRight');
+            await page.waitForTimeout(800);
+            assert.equal(await page.evaluate(() => state.currentSlide), '3-0', 'still on the slide');
+            assert.equal(await page.evaluate(() => state.currentFragment), 0, 'its fragment is shown');
+        });
+    });
+
     it('opens slide links through the drawing layer', async () => {
         await withDeck('notes.html', deckB, async ({ page, context }) => {
             await page.evaluate(() => goToSlide(state.slides[state.slides.length - 1]));
