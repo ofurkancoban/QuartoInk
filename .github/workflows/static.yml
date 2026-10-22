@@ -1,10 +1,12 @@
-# Simple workflow for deploying static content to GitHub Pages
-name: Deploy static content to Pages
+# Validates the Excalidraw widget and deploys the static site to GitHub Pages.
+name: Validate and deploy static site
 
 on:
   # Runs on pushes targeting the default branch
   push:
     branches: ["main"]
+  # Validate pull requests too (no deployment happens for them)
+  pull_request:
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -22,22 +24,58 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Single deploy job since we're just deploying
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: excalidraw-widget/package-lock.json
+      - name: Install widget dependencies
+        working-directory: excalidraw-widget
+        run: npm ci
+      - name: Check build scripts
+        working-directory: excalidraw-widget
+        run: npm run check
+      - name: Rebuild bundle
+        working-directory: excalidraw-widget
+        run: npm run build
+      - name: Ensure committed bundle matches sources
+        run: git diff --exit-code -- excalidraw-widget/dist index.html
+      - name: Install browser for tests
+        working-directory: excalidraw-widget
+        run: npx playwright install --with-deps chromium
+      - name: Browser tests
+        working-directory: excalidraw-widget
+        run: npm test
+
   deploy:
+    needs: validate
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Setup Pages
         uses: actions/configure-pages@v5
+      - name: Stage public files
+        # Only publish what the page needs: no scratch files, sources, tests or large local exports.
+        run: |
+          mkdir -p _site/excalidraw-widget
+          cp index.html manifest.json _site/
+          cp -R assets _site/assets
+          cp -R excalidraw-widget/dist _site/excalidraw-widget/dist
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Upload entire repository
-          path: '.'
+          path: _site
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
