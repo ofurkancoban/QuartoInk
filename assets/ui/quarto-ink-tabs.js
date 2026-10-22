@@ -466,6 +466,12 @@
                 if (typeof showUnsupportedPresentationWarning === 'function') showUnsupportedPresentationWarning(file.name);
                 continue;
             }
+            // A deck saved with its ink (assets/ui/quarto-ink-share.js): the plain deck, and its ink restored.
+            const shared = window.QuartoInkShare && window.QuartoInkShare.extract(content);
+            if (shared) {
+                content = shared.html;
+                try { await window.QuartoInkShare.importInk(file.name, content, shared.annotations); } catch (_e) {}
+            }
             if (file.size > 100 * 1024 * 1024 && window.log) {
                 window.log(`Large file (over 100 MB): ${file.name} stays in memory while its tab is open.`, 'warn');
             }
@@ -596,5 +602,10 @@
         activate,
         close,
         list: () => docs.map((d) => ({ id: d.id, name: d.name, active: d.id === activeId, slide: d.slide, live: !!d.frame })),
+        /** The visible deck's HTML as opened (not the copy prepared for the frame). */
+        activeContent: () => {
+            const doc = findDoc(activeId);
+            return doc ? doc.content : null;
+        },
     };
 })();
