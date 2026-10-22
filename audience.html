@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quarto Ink · Audience</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/icons/favicon-32.png?v=2">
+    <style>
+        :root { color-scheme: dark; }
+        html, body {
+            margin: 0;
+            height: 100%;
+            overflow: hidden;
+            background: #0f1012;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+        }
+        #audience-stage { position: fixed; inset: 0; }
+        /* The deck only shows: the presenter drives it. */
+        #audience-frame {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            border: 0;
+            pointer-events: none;
+            background: #0f1012;
+        }
+        #audience-sheet {
+            display: none;
+            position: absolute;
+            inset: 0;
+            background-color: #ffffff;
+        }
+        #audience-ink {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        #audience-hint {
+            position: fixed;
+            left: 50%;
+            bottom: 24px;
+            transform: translateX(-50%);
+            padding: 8px 14px;
+            border-radius: 999px;
+            background: rgba(15, 16, 18, 0.78);
+            color: #f3eee4;
+            font-size: 13px;
+            transition: opacity 0.4s;
+        }
+        #audience-hint.hidden { opacity: 0; pointer-events: none; }
+        #audience-waiting {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #8d877a;
+            font-size: 15px;
+        }
+        body.has-deck #audience-waiting { display: none; }
+        body.idle { cursor: none; }
+    </style>
+</head>
+<body>
+    <div id="audience-stage">
+        <iframe id="audience-frame" title="Presentation" tabindex="-1"
+            sandbox="allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-downloads"></iframe>
+        <div id="audience-sheet"></div>
+        <canvas id="audience-ink"></canvas>
+    </div>
+    <div id="audience-waiting">Waiting for the presenter...</div>
+    <div id="audience-hint">Click for full screen. The presentation is controlled from the main window.</div>
+    <script src="assets/ui/quarto-ink-audience-view.js"></script>
+</body>
+</html>
