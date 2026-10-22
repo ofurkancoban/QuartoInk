@@ -2781,6 +2781,7 @@ h1, h2, h3 {
 <script src="assets/ui/quarto-ink-tabs.js" defer></script>
 <script src="assets/ui/quarto-ink-export.js" defer></script>
 <script src="assets/ui/quarto-ink-search.js" defer></script>
+<script src="assets/ui/quarto-ink-notes.js" defer></script>
     <script>
     (function() {
         var saved = localStorage.getItem('gn_theme');
@@ -2944,6 +2945,9 @@ h1, h2, h3 {
                                 <button type="button" role="menuitemradio" data-tabs="ink" aria-checked="false" title="The shown tab and the tabs with ink">With ink</button>
                                 <button type="button" role="menuitemradio" data-tabs="shown" aria-checked="false" title="Only the tab each slide shows">Shown</button>
                             </div>
+                            <button type="button" class="qi-export-switch" id="qi-export-notes" role="menuitemcheckbox" aria-checked="false" title="Add your notes below their slides in the PDF">
+                                <span>Include my notes</span><span class="qi-switch-track" aria-hidden="true"><span class="qi-switch-knob"></span></span>
+                            </button>
                         </div>
                         <button type="button" class="clear-menu-item" id="btn-export-png" role="menuitem">
                             <span class="clear-menu-item-icon" aria-hidden="true">
@@ -3089,6 +3093,10 @@ h1, h2, h3 {
                     </div>
                     <div class="annotation-list" id="annotation-list">
                         <!-- List items will be injected here -->
+                    </div>
+                    <div class="qi-notes-panel">
+                        <label class="qi-notes-label" for="qi-slide-notes">My notes <span id="qi-notes-slide"></span></label>
+                        <textarea id="qi-slide-notes" rows="4" placeholder="Notes for this slide. The PDF export can add them below the slide." spellcheck="true" disabled></textarea>
                     </div>
                 </aside>
             </div>
@@ -4143,6 +4151,8 @@ const state = {
     tabRects: [],
     /** Boxes of slide links / close buttons in deck viewport px (bridge LINK_RECTS). */
     linkRects: [],
+    /** The user's notes per slide key (assets/ui/quarto-ink-notes.js). */
+    slideNotes: new Map(),
     rawTabRects: [],
     slideCount: 1,
     slides: [], // Full slide list from bridge
@@ -4552,20 +4562,22 @@ function qiRemoveAnnotations(key) {
 }
 
 function parseAnnotationsPayload(raw) {
-    if (!raw) return { annotations: new Map(), excalidrawScenes: new Map(), annotationEngine: 'excalidraw' };
+    const empty = () => ({ annotations: new Map(), excalidrawScenes: new Map(), slideNotes: new Map(), annotationEngine: 'excalidraw' });
+    if (!raw) return empty();
     try {
         const o = JSON.parse(raw);
         if (o && o.v === 2) {
             return {
                 annotations: new Map(o.annotations || []),
                 excalidrawScenes: new Map(o.excalidrawScenes || []),
+                slideNotes: new Map(Array.isArray(o.slideNotes) ? o.slideNotes : []),
                 annotationEngine: o.annotationEngine === 'ink' ? 'ink' : 'excalidraw'
             };
         }
         const legacy = Array.isArray(o) ? o : [];
-        return { annotations: new Map(legacy), excalidrawScenes: new Map(), annotationEngine: 'excalidraw' };
+        return { ...empty(), annotations: new Map(legacy) };
     } catch (_e) {
-        return { annotations: new Map(), excalidrawScenes: new Map(), annotationEngine: 'excalidraw' };
+        return empty();
     }
 }
 
@@ -4574,6 +4586,7 @@ function stringifyAnnotationsPayload() {
         v: 2,
         annotations: Array.from(state.annotations.entries()),
         excalidrawScenes: Array.from(state.excalidrawScenes.entries()),
+        slideNotes: Array.from((state.slideNotes || new Map()).entries()),
         annotationEngine: state.annotationEngine
     });
 }
@@ -5364,7 +5377,9 @@ function loadFromLocalStorage() {
         const parsed = parseAnnotationsPayload(data);
         state.annotations = parsed.annotations;
         state.excalidrawScenes = parsed.excalidrawScenes;
+        state.slideNotes = parsed.slideNotes;
         state.annotationEngine = isIPadLikeTouchDevice() ? 'excalidraw' : parsed.annotationEngine;
+        if (window.QuartoInkNotes) window.QuartoInkNotes.sync();
 
         redraw();
         syncThicknessUI();
@@ -7210,6 +7225,7 @@ function updateSidebar() {
         return;
     }
 
+    if (window.QuartoInkNotes) window.QuartoInkNotes.sync();
     // While the search box has a query, the list shows the matching slides instead.
     if (window.QuartoInkSearch && window.QuartoInkSearch.renderResults(annotationList)) return;
 
@@ -7219,7 +7235,8 @@ function updateSidebar() {
         const anns = getSlideAnnotationCount(slideKey);
         
         const item = document.createElement('div');
-        item.className = 'sidebar-item' + (isActive ? ' active' : '');
+        item.className = 'sidebar-item' + (isActive ? ' active' : '') + (state.slideNotes && state.slideNotes.has(slideKey) ? ' has-note' : '');
+        item.dataset.slide = slideKey;
         
         const slideNumberLabel = slide.v !== 0 ? `${slide.h + 1}.${slide.v}` : `${slide.h + 1}`;
         

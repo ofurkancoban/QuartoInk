@@ -4,6 +4,7 @@
  * - PDF with or without ink: every slide in order, all fragments shown. A slide with Quarto
  *   tabs gets one page per tab, or, as chosen in the menu, only for the tabs with ink or
  *   only for the tab it shows. Every page carries its words as invisible text.
+ *   On request, the user's notes go below the slide on its (first) page.
  * - PNG: the current slide as it is shown, with its ink.
  *
  * For an exact copy of the deck, the deck iframe is laid out at the slide size with the deck's
@@ -24,6 +25,8 @@
     const JPEG_QUALITY = 0.92;
     const PX_TO_PT = 0.75; // CSS px (96 dpi) to PDF points (72 dpi)
     const TABS_SETTING_KEY = 'qi-export-tabs';
+    const NOTES_SETTING_KEY = 'qi-export-notes';
+    const NOTES_FONT_FAMILY = 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
     const TAB_MODES = ['all', 'ink', 'shown'];
 
     let agentSource = null;
@@ -269,6 +272,86 @@
             const r = overlay.width / overlay.clientWidth;
             ctx.drawImage(overlay, now.x * r, now.y * r, now.width * r, now.height * r, tx, ty, tw, th);
         }
+    }
+
+    // --- The user's notes below a slide -----------------------------------------------
+
+    function getNotesInPdf() {
+        try { return localStorage.getItem(NOTES_SETTING_KEY) === '1'; } catch (_e) { return false; }
+    }
+
+    function setNotesInPdf(on) {
+        try { localStorage.setItem(NOTES_SETTING_KEY, on ? '1' : '0'); } catch (_e) {}
+    }
+
+    /**
+     * The page with a notes area added below the slide: the note drawn into the image and its
+     * words added to the text layer, so they stay selectable and searchable in the PDF.
+     */
+    function appendNotes(page, text) {
+        const k = page.canvas.width / page.width; // canvas px per page px
+        const pad = 28;
+        const labelHeight = 24;
+        const fontPx = 17;
+        const lineHeight = 25;
+        const maxWidth = page.width - pad * 2;
+        const font = `400 ${fontPx}px ${NOTES_FONT_FAMILY}`;
+        const measure = document.createElement('canvas').getContext('2d');
+        measure.font = font;
+
+        // Wrap at word boundaries; empty lines are kept, trailing ones dropped.
+        const lines = [];
+        for (const paragraph of String(text).replace(/\r/g, '').split('\n')) {
+            let line = '';
+            for (const word of paragraph.split(/\s+/).filter(Boolean)) {
+                const trial = line ? `${line} ${word}` : word;
+                if (!line || measure.measureText(trial).width <= maxWidth) line = trial;
+                else {
+                    lines.push(line);
+                    line = word;
+                }
+            }
+            lines.push(line);
+        }
+        while (lines.length && !lines[lines.length - 1]) lines.pop();
+        if (!lines.length) return page;
+
+        const areaHeight = Math.ceil(pad + labelHeight + lines.length * lineHeight + pad * 0.8);
+        const height = page.height + areaHeight;
+        const canvas = document.createElement('canvas');
+        canvas.width = page.canvas.width;
+        canvas.height = Math.round(height * k);
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(page.canvas, 0, 0);
+        ctx.scale(k, k);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, page.height, page.width, areaHeight);
+        ctx.fillStyle = '#d8d2c6';
+        ctx.fillRect(0, page.height, page.width, 1);
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = '#8d877a';
+        ctx.font = `600 11px ${NOTES_FONT_FAMILY}`;
+        ctx.fillText('NOTES', pad, page.height + pad);
+        ctx.fillStyle = '#1d1b17';
+        ctx.font = font;
+        const words = [...page.words];
+        lines.forEach((line, i) => {
+            const top = page.height + pad + labelHeight + i * lineHeight;
+            const y = top + (lineHeight - fontPx * 1.2) / 2;
+            ctx.fillText(line, pad, y);
+            const re = /\S+/g;
+            let m;
+            while ((m = re.exec(line))) {
+                words.push({
+                    text: m[0],
+                    x: pad + measure.measureText(line.slice(0, m.index)).width,
+                    y,
+                    width: measure.measureText(m[0]).width,
+                    height: fontPx * 1.2,
+                });
+            }
+        });
+        return { ...page, canvas, height, words };
     }
 
     // --- Navigation for the PDF -------------------------------------------------
@@ -559,6 +642,7 @@
         if (!(await prepare())) return;
         const current = job = { cancelled: false };
         const tabMode = getTabMode();
+        const withNotes = getNotesInPdf();
         const start = await agentCall('indices');
         const startScope = await agentCall('activeTabScope');
         const progress = showProgress(annotations ? 'Exporting PDF with ink' : 'Exporting PDF', () => { current.cancelled = true; });
@@ -576,11 +660,17 @@
                 await showSlide(slide);
 
                 const scopes = await tabScopesToExport(slideKey, tabMode, annotations);
+                // The note goes on the first page of the slide only.
+                let note = withNotes && state.slideNotes ? (state.slideNotes.get(slideKey) || '').trim() : '';
                 for (const scope of scopes) {
                     if (current.cancelled) break;
                     if (scope !== (await agentCall('activeTabScope')) && !(await agentCall('showTabScope', scope))) continue;
-                    const page = await renderSlide();
+                    let page = await renderSlide();
                     if (annotations) await drawInk(page, slideKey, getCurrentAnnotationKey(slideKey, scope), layout.box);
+                    if (note) {
+                        page = appendNotes(page, note);
+                        note = '';
+                    }
                     // Encoded while the next slide renders; awaited before the PDF is written.
                     const jpeg = canvasToBlob(page.canvas, 'image/jpeg', JPEG_QUALITY)
                         .then(async (blob) => new Uint8Array(await blob.arrayBuffer()));
@@ -670,6 +760,16 @@
             syncTabButtons();
         }));
         syncTabButtons();
+        const notesSwitch = document.getElementById('qi-export-notes');
+        if (notesSwitch) {
+            const syncNotes = () => notesSwitch.setAttribute('aria-checked', getNotesInPdf() ? 'true' : 'false');
+            notesSwitch.addEventListener('click', (e) => {
+                e.stopPropagation();
+                setNotesInPdf(!getNotesInPdf());
+                syncNotes();
+            });
+            syncNotes();
+        }
     }
 
     window.QuartoInkExport = { exportPdf, exportPng, renderCurrentSlide, buildPdf };

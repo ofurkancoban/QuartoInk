@@ -565,6 +565,43 @@ button.gn-color-swatch:focus-visible,
     cursor: pointer;
 }
 .qi-export-tabs-options button:hover { color: var(--text); }
+.qi-export-switch {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    margin-top: 10px;
+    padding: 4px 4px;
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+}
+.qi-export-switch:hover { color: var(--text); }
+.qi-switch-track {
+    position: relative;
+    width: 30px;
+    height: 17px;
+    border-radius: 9px;
+    background: var(--active-bg);
+    transition: background 0.2s var(--qi-ease);
+}
+.qi-switch-knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    transition: transform 0.2s var(--qi-spring);
+}
+.qi-export-switch[aria-checked="true"] .qi-switch-track { background: var(--accent); }
+.qi-export-switch[aria-checked="true"] .qi-switch-knob { transform: translateX(13px); }
 .qi-export-tabs-options button[aria-checked="true"] {
     background: var(--surface);
     color: var(--text);
@@ -733,6 +770,57 @@ button.gn-color-swatch:focus-visible,
     font-size: 0.68rem;
     color: var(--text-dim);
 }
+/* The user's notes for the current slide, at the bottom of the navigator */
+.qi-notes-panel {
+    margin-top: auto;
+    padding: 10px 12px 12px;
+    border-top: 1px dashed var(--qi-line-strong);
+}
+.qi-notes-label {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0 2px 6px;
+    font-family: var(--qi-font-display);
+    font-style: italic;
+    font-size: 1.05rem;
+    color: var(--text);
+}
+#qi-notes-slide {
+    font-family: var(--qi-font-hand);
+    font-style: normal;
+    font-size: 0.82rem;
+    color: var(--accent);
+}
+#qi-slide-notes {
+    width: 100%;
+    min-height: 84px;
+    max-height: 38vh;
+    resize: vertical;
+    padding: 8px 10px;
+    border: 1px solid var(--qi-line);
+    border-radius: 10px;
+    background-color: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.82rem;
+    line-height: 1.45;
+    outline: none;
+}
+#qi-slide-notes:focus { border-color: var(--qi-line-strong); box-shadow: 3px 3px 0 var(--qi-hard-shadow); }
+#qi-slide-notes:disabled { opacity: 0.5; }
+.sidebar-item .sidebar-slide-num { position: relative; }
+.sidebar-item.has-note .sidebar-slide-num::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    right: 2px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+}
+
 .qi-search-result .sidebar-slide-info {
     flex-direction: column;
     align-items: stretch;

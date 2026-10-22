@@ -2,7 +2,8 @@
  * Quarto Ink: search across the slides of the open deck.
  *
  * The text comes from the deck's HTML (every slide, also tab panes that are not shown;
- * speaker notes left out) and from the text notes written on the slides with the Text tool.
+ * speaker notes left out), from the user's notes per slide and from the text written on
+ * the slides with the Text tool.
  * The search box sits at the top of the slide navigator, which then lists only the matching
  * slides with a snippet; Enter goes to the first match. Cmd/Ctrl+F opens it.
  */
@@ -46,9 +47,11 @@
         return texts;
     }
 
-    /** Text notes written on a slide (any of its tabs) with the Text tool. */
+    /** The user's note for a slide, and text written on it (any of its tabs) with the Text tool. */
     function noteText(slideKey) {
         const parts = [];
+        const note = state.slideNotes && state.slideNotes.get(slideKey);
+        if (note) parts.push(note);
         for (const [key, raw] of state.excalidrawScenes || []) {
             if (key !== slideKey && !key.startsWith(`${slideKey}::`)) continue;
             try {

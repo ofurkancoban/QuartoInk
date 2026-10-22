@@ -213,6 +213,32 @@ describe('PDF and PNG export', () => {
         });
     });
 
+    it('adds the user\'s notes below their slide when chosen', async () => {
+        await withDeck('talk.html', deckA, async ({ page }) => {
+            await page.click('#btn-sidebar-toggle');
+            await page.evaluate(() => goToSlide(state.slides[3]));
+            await waitForSlide(page, 4);
+            await page.click('#qi-slide-notes');
+            await page.keyboard.type('Remember the İzmir example');
+            await page.waitForTimeout(600);
+            assert.equal(await page.locator('.sidebar-item.has-note').count(), 1);
+
+            const without = readPdf((await exportVia(page, '#btn-export-pdf-plain')).data);
+            const heights = (pdf) => [...pdf.text.matchAll(/\/MediaBox \[0 0 [\d.]+ ([\d.]+)\]/g)].map((m) => Number(m[1]));
+            assert.deepEqual(heights(without), [525, 525, 525, 525, 525, 525], 'no notes unless chosen');
+
+            await page.click('#btn-export');
+            await page.click('#qi-export-notes');
+            const [download] = await Promise.all([page.waitForEvent('download'), page.click('#btn-export-pdf-plain')]);
+            const withNotes = readPdf(fs.readFileSync(await download.path()));
+            const h = heights(withNotes);
+            assert.equal(h.length, 6);
+            assert.ok(h[4] > 525 && h.filter((v) => v === 525).length === 5, `taller page 5 only: ${h}`);
+            const hex = (word) => Array.from(word, (c) => c.codePointAt(0).toString(16).padStart(4, '0')).join('').toUpperCase();
+            assert.ok(withNotes.text.includes(`<${hex('İzmir')}> Tj`), 'note text is selectable');
+        });
+    });
+
     it('cancels a PDF export and returns to the slide', async () => {
         await withDeck('talk.html', deckA, async ({ page }) => {
             await page.evaluate(() => goToSlide(state.slides[3]));
