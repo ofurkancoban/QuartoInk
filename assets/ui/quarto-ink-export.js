@@ -2,7 +2,8 @@
  * Quarto Ink: PDF and PNG export.
  *
  * - PDF with or without ink: every slide in order, all fragments shown. A slide with Quarto
- *   tabs gets one page per tab.
+ *   tabs gets one page per tab, or, as chosen in the menu, only for the tabs with ink or
+ *   only for the tab it shows.
  * - PNG: the current slide as it is shown, with its ink.
  *
  * For an exact copy of the deck, the deck iframe is laid out at the slide size with the deck's
@@ -21,6 +22,8 @@
     const PX_TO_PT = 0.75; // CSS px (96 dpi) to PDF points (72 dpi)
     const SETTLE_MS = 120; // let charts and fonts settle after a slide change
     const CAPTURE_STYLE_ID = 'qi-export-capture-style';
+    const TABS_SETTING_KEY = 'qi-export-tabs';
+    const TAB_MODES = ['all', 'ink', 'shown'];
 
     let rendererSource = null;
     let job = null; // the running export: { cancelled }
@@ -618,6 +621,33 @@
         return scopes;
     }
 
+    /** Which tabs the PDF gets pages for: 'all', 'ink' (shown tab + tabs with ink) or 'shown'. */
+    function getTabMode() {
+        try {
+            const mode = localStorage.getItem(TABS_SETTING_KEY);
+            if (TAB_MODES.includes(mode)) return mode;
+        } catch (_e) {}
+        return 'all';
+    }
+
+    function setTabMode(mode) {
+        if (!TAB_MODES.includes(mode)) return;
+        try { localStorage.setItem(TABS_SETTING_KEY, mode); } catch (_e) {}
+    }
+
+    /** Tab scopes to export for the current slide, in order (a slide without tabs gives ['']). */
+    function tabScopesToExport(win, slideKey, mode, annotations) {
+        const shown = activeTabScope(win);
+        let scopes;
+        if (mode === 'all') scopes = allTabScopes(win);
+        else scopes = [shown];
+        // Any tab scope with ink (also a combination of several tabsets) when the ink is wanted.
+        if (mode === 'ink' || (mode === 'all' && annotations)) {
+            inkedTabScopes(slideKey).forEach((s) => { if (!scopes.includes(s)) scopes.push(s); });
+        }
+        return scopes;
+    }
+
     /** Tab scopes of a slide that carry ink, e.g. ["#p2"] for "1-0::tab:#p2". */
     function inkedTabScopes(slideKey) {
         const prefix = `${slideKey}::tab:`;
@@ -867,6 +897,7 @@
             return;
         }
         const current = job = { cancelled: false };
+        const tabMode = getTabMode();
         const reveal = win.Reveal;
         const start = reveal.getIndices();
         const startScope = activeTabScope(win);
@@ -885,10 +916,7 @@
                 setStatus(`Exporting PDF: slide ${i + 1} of ${slides.length}`);
                 await showSlide(win, slide);
 
-                // One page per tab, so the content of every tab is in the PDF; then any other tab
-                // scope that carries ink (e.g. a tab combination of several tabsets).
-                const scopes = allTabScopes(win);
-                if (annotations) inkedTabScopes(slideKey).forEach((s) => { if (!scopes.includes(s)) scopes.push(s); });
+                const scopes = tabScopesToExport(win, slideKey, tabMode, annotations);
                 for (const scope of scopes) {
                     if (current.cancelled) break;
                     if (scope !== activeTabScope(win) && !(await showTabScope(win, scope))) continue;
@@ -971,6 +999,18 @@
             const item = document.getElementById(id);
             if (item) item.addEventListener('click', () => { close(); void run(); });
         });
+        // Tabs choice: stays open, so it can be set before picking a PDF.
+        const tabButtons = Array.from(menu.querySelectorAll('[data-tabs]'));
+        const syncTabButtons = () => {
+            const mode = getTabMode();
+            tabButtons.forEach((b) => b.setAttribute('aria-checked', b.dataset.tabs === mode ? 'true' : 'false'));
+        };
+        tabButtons.forEach((b) => b.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setTabMode(b.dataset.tabs);
+            syncTabButtons();
+        }));
+        syncTabButtons();
     }
 
     window.QuartoInkExport = { exportPdf, exportPng, renderCurrentSlide, buildPdf };

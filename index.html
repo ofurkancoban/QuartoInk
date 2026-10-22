@@ -2934,6 +2934,14 @@ h1, h2, h3 {
                             </span>
                             <span class="clear-menu-item-label">PDF without ink</span>
                         </button>
+                        <div class="qi-export-tabs" role="group" aria-labelledby="qi-export-tabs-label">
+                            <span class="qi-export-tabs-label" id="qi-export-tabs-label">Tabs in the PDF</span>
+                            <div class="qi-export-tabs-options">
+                                <button type="button" role="menuitemradio" data-tabs="all" aria-checked="true" title="One page for every tab">All</button>
+                                <button type="button" role="menuitemradio" data-tabs="ink" aria-checked="false" title="The shown tab and the tabs with ink">With ink</button>
+                                <button type="button" role="menuitemradio" data-tabs="shown" aria-checked="false" title="Only the tab each slide shows">Shown</button>
+                            </div>
+                        </div>
                         <button type="button" class="clear-menu-item" id="btn-export-png" role="menuitem">
                             <span class="clear-menu-item-icon" aria-hidden="true">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>

@@ -190,11 +190,23 @@ describe('PDF and PNG export', () => {
             const plain = await exportVia(page, '#btn-export-pdf-plain');
             assert.equal(plain.name, 'talk.pdf');
             const plainPages = readPdf(plain.data).pages;
-            assert.equal(plainPages.length, 6, 'every tab also without ink');
+            assert.equal(plainPages.length, 6, 'every tab also without ink (default "All")');
             const plainChart = await imageStats(page, jpegUrl(plainPages[1]));
             const plainTable = await imageStats(page, jpegUrl(plainPages[2]));
             assert.notEqual(plainChart.dark, plainTable.dark, 'the Table tab has its own page');
             assert.ok(table.dark > plainTable.dark, 'the ink is on the Table page');
+
+            // Tabs choice in the menu: only the shown tab, or the shown tab plus the inked one.
+            const withTabs = async (mode, item) => {
+                await page.click('#btn-export');
+                await page.click(`[data-tabs="${mode}"]`);
+                const [download] = await Promise.all([page.waitForEvent('download', { timeout: 60000 }), page.click(item)]);
+                return readPdf(fs.readFileSync(await download.path())).pages.length;
+            };
+            assert.equal(await withTabs('shown', '#btn-export-pdf-ink'), 5, 'shown tabs only');
+            assert.equal(await withTabs('ink', '#btn-export-pdf-ink'), 6, 'shown tab + inked Table tab');
+            assert.equal(await withTabs('ink', '#btn-export-pdf-plain'), 6, 'same pages without the ink');
+            await withTabs('all', '#btn-export-pdf-plain');
 
             // The deck is back where it was.
             await page.waitForFunction(() => state.currentSlide === '1-0' && state.currentTabScope === '#p1');

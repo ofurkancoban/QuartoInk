@@ -530,6 +530,46 @@ button.gn-color-swatch:focus-visible,
     color: var(--text-secondary);
 }
 .clear-menu-item:hover { background: var(--hover-bg); color: var(--text); }
+/* Export menu: which Quarto tabs the PDF gets pages for */
+.qi-export-tabs {
+    margin: 4px 4px 6px;
+    padding: 8px 0 10px;
+    border-top: 1px solid var(--qi-line, var(--border));
+    border-bottom: 1px solid var(--qi-line, var(--border));
+}
+.qi-export-tabs-label {
+    display: block;
+    margin: 0 4px 6px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--text-ghost);
+}
+.qi-export-tabs-options {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 9px;
+    background: var(--active-bg);
+}
+.qi-export-tabs-options button {
+    flex: 1;
+    padding: 5px 6px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 0.76rem;
+    font-weight: 500;
+    cursor: pointer;
+}
+.qi-export-tabs-options button:hover { color: var(--text); }
+.qi-export-tabs-options button[aria-checked="true"] {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
 .clear-menu-item.clear-menu-danger { color: var(--danger); }
 .clear-menu-item.clear-menu-danger:hover {
     background: var(--danger);
