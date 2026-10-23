@@ -4660,7 +4660,7 @@ function loadScriptOnce(src) {
 
 async function ensureExcalidrawRuntime() {
     window.EXCALIDRAW_ASSET_PATH = new URL('excalidraw-widget/dist/', window.location.href).href;
-    const src = 'excalidraw-widget/dist/quarto-ink-excalidraw.js?v=9f5ad4e30a';
+    const src = 'excalidraw-widget/dist/quarto-ink-excalidraw.js?v=4439f1de67';
     const vm = src.match(/[?&]v=([^&]+)/);
     const wantV = vm ? vm[1] : '';
     const ok =
@@ -8855,6 +8855,10 @@ function setupEventListeners() {
             } else {
                 syncModeUI();
                 queueApplyQuartoExcalidrawToolFromState();
+            }
+            // The picker needs this click's user gesture; tool syncs never open it.
+            if (t === 'image' && window.QuartoInkExcalidraw && typeof window.QuartoInkExcalidraw.openImagePicker === 'function') {
+                window.QuartoInkExcalidraw.openImagePicker();
             }
             syncColorUI();
             // Update active icon in the settings pill (Visual only, no color change)

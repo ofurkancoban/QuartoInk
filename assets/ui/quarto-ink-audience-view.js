@@ -4,6 +4,8 @@
  * It shows the presenter's deck (the same sandboxed copy, driven through its bridge like the
  * magnifier lens) and the presenter's ink, which arrives as images of the drawing layers
  * (assets/ui/quarto-ink-audience.js) and is fitted onto this window's slide area.
+ * The laser trail and the magnifier lens arrive as pointer positions in slide units and are
+ * drawn here: the trail on its own canvas, the lens with a second copy of the deck.
  * Only the window that opened it, from the same origin, can drive it.
  */
 (function () {
@@ -13,12 +15,21 @@
     const sheet = document.getElementById('audience-sheet');
     const canvas = document.getElementById('audience-ink');
     const hint = document.getElementById('audience-hint');
+    const laserCanvas = document.getElementById('audience-laser');
+    const lensEl = document.getElementById('audience-lens');
+    const lensFrame = document.getElementById('audience-lens-frame');
+    const lensInk = document.getElementById('audience-lens-ink');
     const SPACING = 40; // blank page grid, in slide px (as in quarto-ink-whiteboard.js)
+    const LASER_LIFE_MS = 1000; // a laser point fades out over this time
+    const LASER_COLOR = '255, 0, 0'; // Excalidraw's laser red
 
     let target = null; // { h, v, f, scope, whiteboard }
     let slidesBox = null; // the deck's slide area, in this window's px
     let slideWidth = 0;
     let lastInk = null; // { bitmap, box, stage }
+    let laserStrokes = []; // [[{ u, v, t }]]
+    let laserRaf = null;
+    let lens = { active: false }; // { active, u, v, size, zoom } from the presenter
 
     const presenter = () => window.opener;
 
@@ -32,13 +43,24 @@
 
     // --- Slide -------------------------------------------------------------------------
 
-    function showTarget() {
-        if (!target) return;
+    function targetMessages() {
+        if (!target) return [];
         const goto = { type: 'GOTO', h: target.h, v: target.v };
         if (typeof target.f === 'number') goto.f = target.f;
-        toDeck(goto);
-        if (target.scope) toDeck({ type: 'ACTIVATE_TAB_SCOPE', scope: target.scope });
+        return target.scope ? [goto, { type: 'ACTIVATE_TAB_SCOPE', scope: target.scope }] : [goto];
+    }
+
+    function showTarget() {
+        if (!target) return;
+        targetMessages().forEach(toDeck);
+        syncLensDeck();
         renderSheet();
+    }
+
+    /** Slide units (fractions of the slide width, from its top-left) -> this window's px. */
+    function fromSlideUnits(u, v) {
+        if (!slidesBox || !(slidesBox.width > 0)) return null;
+        return { x: slidesBox.x + u * slidesBox.width, y: slidesBox.y + v * slidesBox.width };
     }
 
     function renderSheet() {
@@ -81,6 +103,106 @@
         ctx.drawImage(lastInk.bitmap, 0, 0, lastInk.stage.width, lastInk.stage.height);
     }
 
+    // --- Laser ---------------------------------------------------------------------------
+
+    function addLaser(points) {
+        const now = performance.now();
+        points.forEach((p) => {
+            if (!Number.isFinite(p.u) || !Number.isFinite(p.v)) return;
+            if (p.start || !laserStrokes.length) laserStrokes.push([]);
+            laserStrokes[laserStrokes.length - 1].push({ u: p.u, v: p.v, t: now });
+        });
+        if (!laserRaf) laserRaf = requestAnimationFrame(drawLaser);
+    }
+
+    /** A glowing red trail that thins and fades with age, like the presenter's. */
+    function drawLaser() {
+        laserRaf = null;
+        const dpr = window.devicePixelRatio || 1;
+        const w = Math.round(window.innerWidth * dpr);
+        const h = Math.round(window.innerHeight * dpr);
+        if (laserCanvas.width !== w || laserCanvas.height !== h) {
+            laserCanvas.width = w;
+            laserCanvas.height = h;
+        }
+        const ctx = laserCanvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+        const now = performance.now();
+        laserStrokes = laserStrokes
+            .map((stroke) => stroke.filter((p) => now - p.t < LASER_LIFE_MS))
+            .filter((stroke) => stroke.length);
+        const width = slidesBox ? Math.max(2.5, 5 * slidesBox.width / 1050) : 4;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.shadowColor = `rgba(${LASER_COLOR}, 0.9)`;
+        ctx.shadowBlur = width * 2.5;
+        laserStrokes.forEach((stroke) => {
+            for (let i = 0; i < stroke.length; i++) {
+                const b = fromSlideUnits(stroke[i].u, stroke[i].v);
+                const a = i > 0 ? fromSlideUnits(stroke[i - 1].u, stroke[i - 1].v) : b;
+                if (!a || !b) continue;
+                const life = 1 - (now - stroke[i].t) / LASER_LIFE_MS;
+                ctx.globalAlpha = Math.max(0, life);
+                ctx.strokeStyle = `rgb(${LASER_COLOR})`;
+                ctx.lineWidth = width * (0.3 + 0.7 * life);
+                ctx.beginPath();
+                ctx.moveTo(a.x, a.y);
+                ctx.lineTo(b.x + (a === b ? 0.01 : 0), b.y);
+                ctx.stroke();
+            }
+        });
+        ctx.globalAlpha = 1;
+        if (laserStrokes.length) laserRaf = requestAnimationFrame(drawLaser);
+    }
+
+    // --- Magnifier lens ------------------------------------------------------------------
+
+    function syncLensDeck() {
+        if (!lensFrame.getAttribute('src') || !lensFrame.contentWindow) return;
+        targetMessages().forEach((m) => {
+            try { lensFrame.contentWindow.postMessage(m, '*'); } catch (_e) {}
+        });
+    }
+
+    /** Same geometry as the presenter's lens: the pointed spot, zoomed, in a circle around it. */
+    function renderLens() {
+        const p = lens.active ? fromSlideUnits(lens.u, lens.v) : null;
+        if (!p) {
+            lensEl.classList.remove('visible');
+            return;
+        }
+        // The lens loads the deck once, when it is first used, then follows the slide.
+        const src = frame.getAttribute('src');
+        if (src && lensFrame.getAttribute('src') !== src) lensFrame.setAttribute('src', src);
+        const zoom = lens.zoom > 0 ? lens.zoom : 2;
+        const size = Math.max(80, (lens.size > 0 ? lens.size : 0.24) * slidesBox.width);
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const half = size / 2;
+        lensEl.style.width = size + 'px';
+        lensEl.style.height = size + 'px';
+        lensEl.style.left = Math.max(0, Math.min(vw - size, p.x - half)) + 'px';
+        lensEl.style.top = Math.max(0, Math.min(vh - size, p.y - half)) + 'px';
+        const left = -(p.x * zoom) + half;
+        const top = -(p.y * zoom) + half;
+        [lensFrame, lensInk].forEach((el) => {
+            el.style.width = vw + 'px';
+            el.style.height = vh + 'px';
+            el.style.left = left + 'px';
+            el.style.top = top + 'px';
+            el.style.transform = `scale(${zoom})`;
+        });
+        if (lensInk.width !== canvas.width || lensInk.height !== canvas.height) {
+            lensInk.width = canvas.width;
+            lensInk.height = canvas.height;
+        }
+        const ctx = lensInk.getContext('2d');
+        ctx.clearRect(0, 0, lensInk.width, lensInk.height);
+        if (canvas.width && canvas.height) ctx.drawImage(canvas, 0, 0);
+        lensEl.classList.add('visible');
+    }
+
     // --- Messages ------------------------------------------------------------------------
 
     window.addEventListener('message', (e) => {
@@ -101,7 +223,20 @@
                 if (lastInk && lastInk.bitmap && lastInk.bitmap.close) lastInk.bitmap.close();
                 lastInk = { bitmap: data.bitmap, box: data.box, stage: data.stage };
                 drawInk();
+                if (lens.active) renderLens();
+            } else if (data.type === 'qi-audience-laser' && Array.isArray(data.points)) {
+                addLaser(data.points);
+            } else if (data.type === 'qi-audience-lens') {
+                lens = data.active
+                    ? { active: true, u: Number(data.u), v: Number(data.v), size: Number(data.size), zoom: Number(data.zoom) }
+                    : { active: false };
+                renderLens();
             }
+            return;
+        }
+
+        if (e.source === lensFrame.contentWindow) {
+            if (data.type === 'INIT_STATE' || data.type === 'BRIDGE_READY_FOR_FOCUS') syncLensDeck();
             return;
         }
 
@@ -111,6 +246,7 @@
                 if (data.computedSlideSize && data.computedSlideSize.width) slideWidth = data.computedSlideSize.width;
                 renderSheet();
                 drawInk();
+                renderLens();
             } else if (data.type === 'INIT_STATE' || data.type === 'BRIDGE_READY_FOR_FOCUS') {
                 showTarget();
             } else if (data.type === 'SLIDE_CHANGED' && target
@@ -124,6 +260,8 @@
     window.addEventListener('resize', () => {
         renderSheet();
         drawInk();
+        renderLens();
+        if (laserStrokes.length && !laserRaf) laserRaf = requestAnimationFrame(drawLaser);
     });
 
     // A clicker or the arrow keys pressed here move the presentation in the main window.

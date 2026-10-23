@@ -350,7 +350,7 @@ function syncStateFromHost(iframeRef, props) {
           currentItemOpacity: parsed.initOpacity,
           currentItemFontSize: activeTextFontSize,
           currentItemFontFamily: activeTextFontFamily,
-          activeTool: getExcalToolObject(activeQuartoTool),
+          activeTool: getSyncToolObject(activeQuartoTool),
           openMenu: preserveMenu,
           selectedElementIds: {},
           editingElement: null,
@@ -362,7 +362,9 @@ function syncStateFromHost(iframeRef, props) {
       };
       if (!isSameSlide) {
         updateData.elements = sceneElements;
-        updateData.files = parsed.files;
+        // updateScene() ignores `files`: images need their data added first, or they stay blank.
+        const files = parsed.files ? Object.values(parsed.files) : [];
+        if (files.length) excalAPI.addFiles(files);
       }
       excalAPI.updateScene(updateData);
     } finally {
@@ -374,7 +376,7 @@ function syncStateFromHost(iframeRef, props) {
     const forceTool = () => {
       if (isUserDrawing(excalAPI)) return;
       try {
-        excalAPI.setActiveTool(getExcalToolObject(tool));
+        excalAPI.setActiveTool(getSyncToolObject(tool));
         syncToolbarUI({ withColor: false });
       } catch {}
     };
@@ -662,6 +664,17 @@ function getExcalToolObject(toolName) {
   return QUARTO_TO_EXCALIDRAW_TOOL_MAP[typeof toolName === 'string' && toolName ? toolName : "pen"] || QUARTO_TO_EXCALIDRAW_TOOL_MAP.pen;
 }
 
+/**
+ * Excalidraw opens the file picker every time its image tool is activated. The host re-applies
+ * the tool on every slide change, colour change and mount, which reopened the picker in a loop
+ * ("File picker already active"). So these syncs keep the image tool on selection, where the
+ * inserted image can be moved and resized; only openImagePicker() (a click) opens the picker.
+ */
+function getSyncToolObject(toolName) {
+  const tool = getExcalToolObject(toolName);
+  return tool.type === "image" ? QUARTO_TO_EXCALIDRAW_TOOL_MAP.lasso : tool;
+}
+
 function ExcalidrawWidget(props) {
   const { slideKey, sceneSerialized, initialToolbarStroke, initialToolbarStrokeWidth, initialUiTheme, initialQuartoTool } = props;
   const timerRef = useRef(null);
@@ -689,7 +702,7 @@ function ExcalidrawWidget(props) {
         currentItemOpacity: initOpacity,
         currentItemFontSize: activeTextFontSize,
         currentItemFontFamily: activeTextFontFamily,
-        activeTool: getExcalToolObject(initialQuartoTool)
+        activeTool: getSyncToolObject(initialQuartoTool)
       },
       files: {}
     };
@@ -713,7 +726,7 @@ function ExcalidrawWidget(props) {
           currentItemOpacity: initOpacity,
           currentItemFontSize: activeTextFontSize,
           currentItemFontFamily: activeTextFontFamily,
-          activeTool: getExcalToolObject(initialQuartoTool)
+          activeTool: getSyncToolObject(initialQuartoTool)
         },
         files: restored.files || {}
       };
@@ -1079,7 +1092,7 @@ function ExcalidrawWidget(props) {
           const initScene = () => {
             if (isUserDrawing(api)) return;
             try {
-              api.setActiveTool(getExcalToolObject(activeQuartoTool));
+              api.setActiveTool(getSyncToolObject(activeQuartoTool));
               api.updateScene({
                 appState: { gridSize: null },
                 commitToHistory: false
@@ -1185,7 +1198,7 @@ function isReadyForInput() {
   if (!api) return false;
   if (performance.now() - lastRootCreatedAt > 1000) return true;
   try {
-    return api.getAppState().activeTool.type === getExcalToolObject(activeQuartoTool).type;
+    return api.getAppState().activeTool.type === getSyncToolObject(activeQuartoTool).type;
   } catch {
     return true;
   }
@@ -1286,10 +1299,26 @@ function applyQuartoTool(toolName) {
       requestEraserFrameCallback();
     }
   }
-  const excalTool = getExcalToolObject(toolName);
+  const excalTool = getSyncToolObject(toolName);
   try {
     api.setActiveTool(excalTool);
     syncToolbarUI();
+  } catch {}
+}
+
+/**
+ * Opens the file picker once and drops the picked image in the middle of the slide, at its
+ * natural size, selected so it can be moved and resized. Call from a user gesture.
+ * Inserted directly: Excalidraw's "click to place" step needs the image tool to stay active
+ * until that click, and the host's tool syncs end it, which left a zero-size image that was
+ * dropped when the slide was shown again.
+ */
+function openImagePicker() {
+  const api = excalidrawRootRef.current;
+  if (!api) return;
+  activeQuartoTool = "image";
+  try {
+    api.setActiveTool({ type: "image", insertOnCanvasDirectly: true });
   } catch {}
 }
 
@@ -1506,6 +1535,7 @@ window.QuartoInkExcalidraw = {
   setTextFontSize,
   syncQuartoToolFromHost,
   applyQuartoTool,
+  openImagePicker,
   setExcalidrawShapeMenuOpen,
   setCurrentItemStrokeColor,
   setCurrentItemStrokeWidth,

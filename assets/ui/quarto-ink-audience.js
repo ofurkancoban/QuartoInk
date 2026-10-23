@@ -5,6 +5,9 @@
  * on the presenter's deck, slide, fragment, tab and blank page, and streams the ink: images of
  * the drawing layers, a few times a second and smoothly while drawing, transferred without a
  * copy. The audience view (assets/ui/quarto-ink-audience-view.js) fits them onto its slide.
+ * The laser and the magnifier lens are not drawing layers (Excalidraw draws the laser as SVG,
+ * the lens is a second copy of the deck), so their pointer positions are sent instead, in slide
+ * units, and the audience view draws them itself.
  */
 (function () {
     'use strict';
@@ -20,6 +23,8 @@
     let lastInkAt = 0;
     let lastPointerAt = 0;
     let capturing = false;
+    let laserPoints = []; // { u, v, start } in slide units, waiting for the next tick
+    let lastLens = null;
 
     const isOpen = () => !!popup && !popup.closed;
 
@@ -77,6 +82,43 @@
         return { bitmap, box: { x: box.x, y: box.y, width: box.width, height: box.height }, stage: { width: sr.width, height: sr.height } };
     }
 
+    /** Client px -> slide units: x and y over the slide width, from the slide's top-left. */
+    function toSlideUnits(clientX, clientY) {
+        const stage = document.getElementById('editor-stage');
+        const box = state.slidesBox || state.slideMetrics;
+        if (!stage || !box || !(box.width > 0)) return null;
+        const sr = stage.getBoundingClientRect();
+        return { u: (clientX - sr.left - box.x) / box.width, v: (clientY - sr.top - box.y) / box.width };
+    }
+
+    function lensState() {
+        const zoomple = typeof ZOOMPLE !== 'undefined' ? ZOOMPLE : null;
+        const lens = document.getElementById('zoomple-lens');
+        const box = state.slidesBox || state.slideMetrics;
+        if (!zoomple || !zoomple.active || !lens || !lastPointer || !box || !(box.width > 0)) return { active: false };
+        const p = toSlideUnits(lastPointer.x, lastPointer.y);
+        if (!p) return { active: false };
+        return { active: true, u: p.u, v: p.v, size: zoomple.LENS_SIZE / box.width, zoom: zoomple.ZOOM_FACTOR };
+    }
+
+    function sendPointers() {
+        // A held laser keeps its head on the audience screen even when it does not move.
+        if (laserDown && lastPointer && !laserPoints.length) {
+            const p = toSlideUnits(lastPointer.x, lastPointer.y);
+            if (p) laserPoints.push({ u: p.u, v: p.v, start: false });
+        }
+        if (laserPoints.length) {
+            send({ type: 'qi-audience-laser', points: laserPoints });
+            laserPoints = [];
+        }
+        const lens = lensState();
+        const key = JSON.stringify(lens);
+        if (key !== lastLens) {
+            lastLens = key;
+            send({ type: 'qi-audience-lens', ...lens });
+        }
+    }
+
     async function tick() {
         if (!isOpen()) {
             stop();
@@ -94,6 +136,7 @@
             lastSlide = key;
             send(slide);
         }
+        sendPointers();
         const now = performance.now();
         const active = now - lastPointerAt < ACTIVE_WINDOW_MS;
         if (!capturing && now - lastInkAt >= (active ? ACTIVE_MS : IDLE_MS)) {
@@ -113,6 +156,7 @@
         if (timer) return;
         lastDeck = null;
         lastSlide = null;
+        lastLens = null;
         timer = setInterval(() => { void tick(); }, ACTIVE_MS);
         syncButton();
     }
@@ -141,6 +185,7 @@
         if (e.data.type === 'qi-audience-ready') {
             lastDeck = null;
             lastSlide = null;
+            lastLens = null;
             start();
         } else if (e.data.type === 'qi-audience-nav' && (e.data.dir === 'Next' || e.data.dir === 'Prev')) {
             navigateSlide(e.data.dir);
@@ -148,9 +193,33 @@
     });
 
     // Draw smoothly in the audience window while the pointer moves on the slide.
+    let lastPointer = null;
+    let laserDown = false;
+    const onStage = (e) => !!(e.target && e.target.closest && e.target.closest('#editor-stage'));
+
+    function addLaserPoint(e, start) {
+        const p = toSlideUnits(e.clientX, e.clientY);
+        if (p) laserPoints.push({ u: p.u, v: p.v, start: !!start });
+    }
+
     document.addEventListener('pointermove', (e) => {
-        if (timer && e.target && e.target.closest && e.target.closest('#editor-stage')) lastPointerAt = performance.now();
+        if (!timer) return;
+        lastPointer = { x: e.clientX, y: e.clientY };
+        if (onStage(e)) lastPointerAt = performance.now();
+        if (laserDown) {
+            const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [];
+            (events.length ? events : [e]).forEach((c) => addLaserPoint(c, false));
+        }
     }, true);
+    document.addEventListener('pointerdown', (e) => {
+        if (!timer) return;
+        lastPointer = { x: e.clientX, y: e.clientY };
+        laserDown = state.tool === 'laser' && onStage(e);
+        if (laserDown) addLaserPoint(e, true);
+    }, true);
+    const endLaser = () => { laserDown = false; };
+    window.addEventListener('pointerup', endLaser, true);
+    window.addEventListener('pointercancel', endLaser, true);
 
     function init() {
         const btn = document.getElementById('btn-audience');

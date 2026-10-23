@@ -1,7 +1,7 @@
 // In-app dialogs, accessible toolbar state, property panel tweaks and same-name files.
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startServer, fixture, launch, openApp, waitForDeck, openDecks, drawStroke, appInfo } from './helpers.mjs';
+import { startServer, fixture, launch, openApp, waitForDeck, waitForSlide, openDecks, drawStroke, appInfo } from './helpers.mjs';
 
 describe('Interface details', () => {
     let server;
@@ -103,6 +103,47 @@ describe('Interface details', () => {
             const sliders = await page.$$eval('#excalidraw-host .selected-shape-actions .range-input',
                 (list) => list.map((i) => getComputedStyle(i.closest('.control-label')).display));
             assert.ok(sliders.every((d) => d === 'none'), 'opacity slider hidden');
+            assert.deepEqual(errors, []);
+        } finally {
+            await context.close();
+        }
+    });
+
+    it('inserts a picked image once and keeps it on the slide', async () => {
+        const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
+        // Stands in for the system file picker: one PNG, and a second call while it is open fails as in Chrome.
+        await context.addInitScript(() => {
+            window.__pickerCalls = 0;
+            window.showOpenFilePicker = async () => {
+                window.__pickerCalls++;
+                if (window.__pickerOpen) throw new DOMException('File picker already active.', 'NotAllowedError');
+                window.__pickerOpen = true;
+                await new Promise((r) => setTimeout(r, 300));
+                window.__pickerOpen = false;
+                const blob = await (await fetch('/assets/logo.png')).blob();
+                const file = new File([blob], 'logo.png', { type: 'image/png' });
+                return [{ kind: 'file', name: 'logo.png', getFile: async () => file }];
+            };
+        });
+        const { page, errors } = await openApp(browser, server, { context });
+        try {
+            await openDecks(page, [['talk.html', deckA]]);
+            await waitForDeck(page, 'talk.html');
+            await page.click('#btn-image');
+            await page.waitForFunction(() => {
+                const els = window.QuartoInkExcalidraw.getAPI().getSceneElements();
+                return els.length === 1 && els[0].type === 'image' && els[0].width > 0;
+            }, null, { timeout: 5000 });
+            await page.waitForTimeout(1500);
+            assert.equal(await page.evaluate(() => window.__pickerCalls), 1, 'the picker opens once');
+
+            await page.evaluate(() => goToSlide(state.slides[1]));
+            await waitForSlide(page, 2);
+            await page.evaluate(() => goToSlide(state.slides[0]));
+            await waitForSlide(page, 1);
+            const images = await page.evaluate(() => window.QuartoInkExcalidraw.getAPI().getSceneElements()
+                .filter((e) => e.type === 'image' && e.width > 0).length);
+            assert.equal(images, 1, 'the image is still there after a slide change');
             assert.deepEqual(errors, []);
         } finally {
             await context.close();
