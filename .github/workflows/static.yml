@@ -69,7 +69,7 @@ jobs:
         # Only publish what the page needs: no scratch files, sources, tests or large local exports.
         run: |
           mkdir -p _site/excalidraw-widget
-          cp index.html manifest.json _site/
+          cp index.html audience.html manifest.json _site/
           cp -R assets _site/assets
           cp -R excalidraw-widget/dist _site/excalidraw-widget/dist
       - name: Upload artifact
