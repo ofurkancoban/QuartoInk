@@ -70,7 +70,15 @@ export async function openApp(browser, server, options = {}) {
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', (e) => { if (!/replaceState/.test(e.message)) errors.push(e.message); });
-    page.on('dialog', (d) => { errors.push('dialog: ' + d.message()); d.dismiss(); });
+    page.on('dialog', (d) => {
+        // "Leave site?" from unsaved ink (assets/ui/quarto-ink-leave.js): tests reload on purpose.
+        if (d.type() === 'beforeunload') {
+            d.accept();
+            return;
+        }
+        errors.push('dialog: ' + d.message());
+        d.dismiss();
+    });
     await page.goto(server.url);
     await page.waitForFunction(() => typeof window.processFileContent === 'function' && !!window.QuartoInkDocs);
     return { context, page, errors };
@@ -111,6 +119,13 @@ export async function drawStroke(page, at = 0.7) {
     }
     await page.mouse.up();
     await page.waitForTimeout(900);
+}
+
+/** Close the visible deck's tab; with unsaved ink, answer the save dialog with "Close without saving". */
+export async function closeTabWithoutSaving(page) {
+    await page.click('.qi-doc-tab.is-active .qi-doc-tab-close');
+    const discard = page.locator('.qi-leave-dialog [data-leave="discard"]');
+    await discard.waitFor({ timeout: 1500 }).then(() => discard.click(), () => {});
 }
 
 /** Snapshot of the app state that tests assert on. */

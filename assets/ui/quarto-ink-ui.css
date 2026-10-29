@@ -1740,6 +1740,11 @@ button.gn-color-swatch:focus-visible,
 .qi-dialog-ok:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--accent); }
 .qi-dialog-ok.is-danger { background: var(--danger); border-color: var(--danger); color: #fff; box-shadow: 3px 3px 0 var(--qi-hard-shadow); }
 
+/* Save before leaving (assets/ui/quarto-ink-leave.js): the save choices, then cancel and discard */
+.qi-leave-dialog .qi-leave-saves { justify-content: flex-start; margin-bottom: 18px; }
+.qi-leave-dialog .qi-leave-saves .qi-dialog-btn { flex: 1; }
+.qi-leave-dialog .qi-dialog-cancel.is-danger { color: var(--danger); border-color: var(--danger); }
+
 /* PDF export progress (assets/ui/quarto-ink-export.js) */
 .qi-export-progress { z-index: 10040; }
 .qi-export-progress .qi-dialog-message { margin-bottom: 14px; }

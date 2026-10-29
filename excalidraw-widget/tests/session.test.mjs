@@ -1,7 +1,7 @@
 // Storage in IndexedDB and restoring the open tabs after a reload.
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startServer, fixture, launch, openApp, waitForDeck, openDecks, drawStroke, appInfo } from './helpers.mjs';
+import { startServer, fixture, launch, openApp, waitForDeck, openDecks, drawStroke, appInfo, closeTabWithoutSaving } from './helpers.mjs';
 
 describe('Session and storage', () => {
     let server;
@@ -89,7 +89,7 @@ describe('Session and storage', () => {
             const key = 'a.html|' + Buffer.byteLength(deckA, 'utf8');
             await page.waitForFunction(async (k) => !!(await window.QuartoInkStore.getDeck(k)), key);
 
-            await page.click('.qi-doc-tab.is-active .qi-doc-tab-close');
+            await closeTabWithoutSaving(page);
             await page.waitForTimeout(700);
             await reload(page);
             await page.waitForTimeout(800);

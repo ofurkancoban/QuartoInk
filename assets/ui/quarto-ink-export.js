@@ -737,7 +737,10 @@
         } else if (pdf) {
             download(pdf, `${baseFileName()}${annotations ? '-annotated' : ''}.pdf`);
             setStatus(`Exported PDF: ${pages.length} page${pages.length === 1 ? '' : 's'}`);
+            if (annotations) window.dispatchEvent(new CustomEvent('quartoink:ink-saved'));
+            return true;
         }
+        return false;
     }
 
     // --- Menu -------------------------------------------------------------------

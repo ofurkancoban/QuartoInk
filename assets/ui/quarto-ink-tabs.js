@@ -351,6 +351,7 @@
         if (id === activeId) return;
         const doc = findDoc(id);
         if (!doc) return;
+        if (window.QuartoInkLeave) window.QuartoInkLeave.noteActive();
         rememberActive();
         const prev = findDoc(activeId);
         activeId = id;
@@ -412,9 +413,20 @@
         try { updateSidebar(); } catch (_e) {}
     }
 
+    /** Close from the tab's button: unsaved ink is offered to be saved first (assets/ui/quarto-ink-leave.js). */
+    function requestClose(id) {
+        const leave = window.QuartoInkLeave;
+        if (!leave) {
+            close(id);
+            return;
+        }
+        leave.beforeClose(id).then((ok) => { if (ok) close(id); }, () => close(id));
+    }
+
     function close(id) {
         const idx = docs.findIndex((d) => d.id === id);
         if (idx < 0) return;
+        if (id === activeId && window.QuartoInkLeave) window.QuartoInkLeave.noteActive();
         const doc = docs[idx];
         const wasActive = id === activeId;
         if (wasActive) {
@@ -533,7 +545,7 @@
                 main.appendChild(where);
             }
             main.addEventListener('click', () => activate(doc.id));
-            main.addEventListener('auxclick', (e) => { if (e.button === 1) close(doc.id); });
+            main.addEventListener('auxclick', (e) => { if (e.button === 1) requestClose(doc.id); });
 
             const x = document.createElement('button');
             x.type = 'button';
@@ -541,7 +553,7 @@
             x.setAttribute('aria-label', 'Close ' + doc.name);
             x.title = 'Close';
             x.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M7 7.5l9.5 9M16.5 7.2L7.2 16.8"/></svg>';
-            x.addEventListener('click', (e) => { e.stopPropagation(); close(doc.id); });
+            x.addEventListener('click', (e) => { e.stopPropagation(); requestClose(doc.id); });
 
             tab.appendChild(main);
             tab.appendChild(x);

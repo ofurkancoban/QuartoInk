@@ -99,6 +99,7 @@
         setTimeout(() => URL.revokeObjectURL(a.href), 4000);
         const status = document.getElementById('status-left');
         if (status) status.textContent = 'Saved the deck with its ink';
+        window.dispatchEvent(new CustomEvent('quartoink:ink-saved'));
     }
 
     function init() {
