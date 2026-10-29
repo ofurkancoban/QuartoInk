@@ -100,4 +100,47 @@ describe('Blank pages', () => {
             await context.close();
         }
     });
+
+    it('keeps added pages and the text written on them across reloads', async () => {
+        const { page, context, errors } = await openApp(browser, server);
+        const inkOnPage = () => page.evaluate(() => {
+            const key = [...state.excalidrawScenes.keys()].find((k) => k.includes('::wb:'));
+            if (!key) return [];
+            return JSON.parse(state.excalidrawScenes.get(key)).elements.filter((e) => !e.isDeleted).map((e) => e.type === 'text' ? `text:${e.text}` : e.type);
+        });
+        try {
+            await openDecks(page, [['notes.html', deckA]]);
+            await waitForDeck(page, 'notes.html');
+
+            // A page with nothing on it yet is kept too.
+            await page.keyboard.press('b');
+            await waitWhere(page, '0-0 page 1');
+            await page.waitForTimeout(800); // the store writes to IndexedDB in the background
+            await page.reload();
+            await waitForDeck(page, 'notes.html');
+            assert.equal(await page.evaluate(() => window.QuartoInkWhiteboard.pages('0-0').length), 1, 'empty page kept');
+
+            // Text written on the page.
+            await page.evaluate(() => window.QuartoInkWhiteboard.enter('0-0', window.QuartoInkWhiteboard.pages('0-0')[0].id));
+            await waitWhere(page, '0-0 page 1');
+            await page.click('#btn-text');
+            await page.waitForTimeout(300);
+            const box = await (await page.$('#editor-stage')).boundingBox();
+            await page.mouse.click(box.x + box.width * 0.4, box.y + box.height * 0.4);
+            await page.waitForSelector('#excalidraw-host .excalidraw-wysiwyg');
+            await page.keyboard.type('Hello page');
+            await page.keyboard.press('Escape');
+            await page.waitForTimeout(900);
+            assert.deepEqual(await inkOnPage(), ['text:Hello page']);
+
+            await page.reload();
+            await waitForDeck(page, 'notes.html');
+            await page.evaluate(() => window.QuartoInkWhiteboard.enter('0-0', window.QuartoInkWhiteboard.pages('0-0')[0].id));
+            await waitWhere(page, '0-0 page 1');
+            assert.deepEqual(await inkOnPage(), ['text:Hello page'], 'text kept after a reload');
+            assert.deepEqual(errors, []);
+        } finally {
+            await context.close();
+        }
+    });
 });

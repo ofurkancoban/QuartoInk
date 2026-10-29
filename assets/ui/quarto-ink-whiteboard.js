@@ -89,6 +89,8 @@
         list.splice(cur ? cur.index + 1 : 0, 0, page);
         state.whiteboards.set(slideKey, list);
         show(slideKey, page.id);
+        // Saved now: a page with nothing drawn on it yet would otherwise be lost on a reload.
+        try { saveToLocalStorage(); } catch (_e) {}
     }
 
     function setStyle(style) {
@@ -126,6 +128,7 @@
             state.excalidrawScenes.delete(key);
             state.currentWhiteboard = next ? { slideKey: cur.slideKey, id: next.id } : null;
         });
+        try { saveToLocalStorage(); } catch (_e) {}
         render();
     }
 

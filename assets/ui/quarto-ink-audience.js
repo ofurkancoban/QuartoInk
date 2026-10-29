@@ -221,9 +221,30 @@
     window.addEventListener('pointerup', endLaser, true);
     window.addEventListener('pointercancel', endLaser, true);
 
+    // An iPad opens the window as one more tab and mirrors its own screen to a projector, so
+    // there is no second screen to send it to: the button gives its place to "add a blank page".
+    function isIPad() {
+        const ua = navigator.userAgent || '';
+        return /iPad/.test(ua) || (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1);
+    }
+
     function init() {
         const btn = document.getElementById('btn-audience');
-        if (btn) btn.addEventListener('click', open);
+        if (!btn) return;
+        if (isIPad()) {
+            btn.hidden = true;
+            btn.style.display = 'none';
+            const addPage = document.getElementById('btn-add-page');
+            if (addPage) {
+                addPage.hidden = false;
+                addPage.style.display = '';
+                addPage.addEventListener('click', () => {
+                    if (window.QuartoInkWhiteboard) window.QuartoInkWhiteboard.add();
+                });
+            }
+            return;
+        }
+        btn.addEventListener('click', open);
     }
 
     window.QuartoInkAudience = { open, isOpen };

@@ -19,6 +19,17 @@ describe('Audience window', () => {
         await server.close();
     });
 
+    it('hides "add a blank page" on a computer', async () => {
+        const { page, context, errors } = await openApp(browser, server);
+        try {
+            assert.equal(await page.isVisible('#btn-add-page'), false);
+            assert.equal(await page.isVisible('#btn-audience'), true);
+            assert.deepEqual(errors, []);
+        } finally {
+            await context.close();
+        }
+    });
+
     it('mirrors slides, blank pages and ink, and passes keys back', async () => {
         const { page, context, errors } = await openApp(browser, server);
         try {
@@ -105,6 +116,33 @@ describe('Audience window', () => {
             await audience.waitForFunction(() => !document.getElementById('audience-lens').classList.contains('visible'), null, { timeout: 5000 });
             assert.deepEqual(errors, []);
             assert.deepEqual(audienceErrors, []);
+        } finally {
+            await context.close();
+        }
+    });
+
+    it('shows "add a blank page" in place of the audience button on an iPad', async () => {
+        // iPadOS Safari reports itself as a Mac with a touch screen.
+        const context = await browser.newContext({
+            viewport: { width: 1180, height: 820 },
+            hasTouch: true,
+            userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+        });
+        await context.addInitScript(() => {
+            Object.defineProperty(Navigator.prototype, 'maxTouchPoints', { get: () => 5 });
+            Object.defineProperty(Navigator.prototype, 'platform', { get: () => 'MacIntel' });
+        });
+        const { page, errors } = await openApp(browser, server, { context });
+        try {
+            assert.equal(await page.isVisible('#btn-audience'), false);
+            assert.equal(await page.isVisible('#btn-record'), true, 'other buttons stay');
+            await openDecks(page, [['talk.html', deckA]]);
+            await waitForDeck(page, 'talk.html');
+            await page.evaluate(() => window.closeIOSPopup && window.closeIOSPopup()); // "Add to Home Screen" prompt
+            await page.waitForTimeout(400);
+            await page.click('#btn-add-page');
+            await page.waitForFunction(() => window.QuartoInkWhiteboard.pages('0-0').length === 1 && !!window.QuartoInkWhiteboard.current());
+            assert.deepEqual(errors, []);
         } finally {
             await context.close();
         }
