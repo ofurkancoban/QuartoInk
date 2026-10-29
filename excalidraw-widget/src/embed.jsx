@@ -350,6 +350,7 @@ function syncStateFromHost(iframeRef, props) {
           currentItemOpacity: parsed.initOpacity,
           currentItemFontSize: activeTextFontSize,
           currentItemFontFamily: activeTextFontFamily,
+          ...toolStyleAppState(activeQuartoTool),
           activeTool: getSyncToolObject(activeQuartoTool),
           openMenu: preserveMenu,
           selectedElementIds: {},
@@ -435,6 +436,71 @@ let activeTextFontFamily = FONT_FAMILY.Nunito;
 // Excalidraw's size presets and the radio inputs of its panel that apply them.
 const TEXT_SIZE_INPUTS = { 16: "fontSize-small", 20: "fontSize-medium", 28: "fontSize-large", 36: "fontSize-veryLarge" };
 
+// Property panel settings kept per tool in the browser, so a reload or the next slide (each
+// mounts a new Excalidraw) starts with what the user picked last for that tool. Stroke colour
+// and width are kept by the host (gn_tool_colors, gn_tool_widths); stroke style, sloppiness
+// and opacity are fixed by the app.
+const TOOL_STYLE_STORAGE_KEY = "gn_tool_styles_v1";
+const TOOL_STYLE_DEFAULTS = {
+  currentItemBackgroundColor: "transparent",
+  currentItemFillStyle: "solid",
+  currentItemRoundness: "round",
+  currentItemStartArrowhead: null,
+  currentItemEndArrowhead: "arrow",
+  currentItemArrowType: "round",
+  currentItemTextAlign: "left"
+};
+const TOOL_STYLE_FIELDS = Object.keys(TOOL_STYLE_DEFAULTS);
+// Text size and font are shared by every tool that writes text, so they are stored once.
+const TEXT_STYLE_TOOL = "_text";
+
+function readToolStyles() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(TOOL_STYLE_STORAGE_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeToolStyle(tool, style) {
+  if (!tool || !style) return;
+  try {
+    const all = readToolStyles();
+    all[tool] = { ...(all[tool] || {}), ...style };
+    localStorage.setItem(TOOL_STYLE_STORAGE_KEY, JSON.stringify(all));
+  } catch {}
+}
+
+/** The panel settings to apply for a tool: what was saved for it, else Excalidraw's defaults. */
+function toolStyleAppState(tool) {
+  const saved = readToolStyles()[tool] || {};
+  const out = {};
+  TOOL_STYLE_FIELDS.forEach((field) => {
+    out[field] = Object.prototype.hasOwnProperty.call(saved, field) ? saved[field] : TOOL_STYLE_DEFAULTS[field];
+  });
+  return out;
+}
+
+/** Save the panel settings of the active tool from the current Excalidraw. */
+function rememberToolStyle() {
+  try {
+    const appState = excalidrawRootRef.current?.getAppState();
+    if (!appState || !activeQuartoTool || activeQuartoTool === "eraser" || activeQuartoTool === "laser") return;
+    const style = {};
+    TOOL_STYLE_FIELDS.forEach((field) => {
+      if (appState[field] !== undefined) style[field] = appState[field];
+    });
+    writeToolStyle(activeQuartoTool, style);
+  } catch {}
+}
+
+(function loadSavedTextStyle() {
+  const saved = readToolStyles()[TEXT_STYLE_TOOL] || {};
+  if (typeof saved.fontSize === "number" && Number.isFinite(saved.fontSize) && saved.fontSize > 0) activeTextFontSize = saved.fontSize;
+  if (typeof saved.fontFamily === "number" && Number.isFinite(saved.fontFamily)) activeTextFontFamily = saved.fontFamily;
+})();
+
 /** Remember the text size and font the user picked in the current Excalidraw. */
 function rememberTextStyle() {
   try {
@@ -443,6 +509,7 @@ function rememberTextStyle() {
     const family = appState?.currentItemFontFamily;
     if (typeof size === 'number' && Number.isFinite(size) && size > 0) activeTextFontSize = size;
     if (typeof family === 'number' && Number.isFinite(family)) activeTextFontFamily = family;
+    writeToolStyle(TEXT_STYLE_TOOL, { fontSize: activeTextFontSize, fontFamily: activeTextFontFamily });
   } catch {}
 }
 
@@ -702,6 +769,7 @@ function ExcalidrawWidget(props) {
         currentItemOpacity: initOpacity,
         currentItemFontSize: activeTextFontSize,
         currentItemFontFamily: activeTextFontFamily,
+        ...toolStyleAppState(initialQuartoTool),
         activeTool: getSyncToolObject(initialQuartoTool)
       },
       files: {}
@@ -726,6 +794,7 @@ function ExcalidrawWidget(props) {
           currentItemOpacity: initOpacity,
           currentItemFontSize: activeTextFontSize,
           currentItemFontFamily: activeTextFontFamily,
+          ...toolStyleAppState(initialQuartoTool),
           activeTool: getSyncToolObject(initialQuartoTool)
         },
         files: restored.files || {}
@@ -957,6 +1026,7 @@ function ExcalidrawWidget(props) {
       if (!(e.target instanceof Element) || !e.target.closest('.selected-shape-actions, .FontPicker__container, [data-testid^="font-family-"]')) return;
       // A font change is applied after its font has loaded, so read again a little later.
       [0, 250, 800].forEach((delay) => setTimeout(() => {
+        rememberToolStyle();
         rememberTextStyle();
         window.dispatchEvent(new CustomEvent('quartoink:textstyle'));
       }, delay));
@@ -1253,6 +1323,7 @@ function getTextFontSize() {
 function setTextFontSize(size) {
   if (!TEXT_SIZE_INPUTS[size]) return;
   activeTextFontSize = size;
+  writeToolStyle(TEXT_STYLE_TOOL, { fontSize: size, fontFamily: activeTextFontFamily });
   const input = document.querySelector(`#excalidraw-host [data-testid="${TEXT_SIZE_INPUTS[size]}"]`);
   if (input) {
     input.click();
@@ -1301,6 +1372,7 @@ function applyQuartoTool(toolName) {
   }
   const excalTool = getSyncToolObject(toolName);
   try {
+    api.updateScene({ appState: toolStyleAppState(toolName), commitToHistory: false });
     api.setActiveTool(excalTool);
     syncToolbarUI();
   } catch {}

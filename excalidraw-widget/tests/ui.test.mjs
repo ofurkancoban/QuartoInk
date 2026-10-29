@@ -1,7 +1,7 @@
 // In-app dialogs, accessible toolbar state, property panel tweaks and same-name files.
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startServer, fixture, launch, openApp, waitForDeck, waitForSlide, openDecks, drawStroke, appInfo } from './helpers.mjs';
+import { startServer, fixture, launch, openApp, waitForDeck, waitForSlide, openDecks, drawStroke, appInfo, closeTabWithoutSaving } from './helpers.mjs';
 
 describe('Interface details', () => {
     let server;
@@ -22,7 +22,7 @@ describe('Interface details', () => {
     });
 
     const closeActiveTab = async (page) => {
-        await page.click('.qi-doc-tab.is-active .qi-doc-tab-close');
+        await closeTabWithoutSaving(page);
         await page.waitForFunction(() => window.QuartoInkDocs.list().length === 0);
     };
 
@@ -193,6 +193,94 @@ describe('Interface details', () => {
             assert.equal((await appInfo(page)).count, 1, 'legacy ink is shown');
             const legacyLeft = await page.evaluate((legacy) => qiGetAnnotations(legacy), keys.legacy);
             assert.equal(legacyLeft, null, 'legacy entry moved to the new key');
+            assert.deepEqual(errors, []);
+        } finally {
+            await context.close();
+        }
+    });
+
+    it('keeps the property panel below the toolbar when Excalidraw re-creates it', async () => {
+        const { page, context, errors } = await openApp(browser, server, { viewport: { width: 1366, height: 954 } });
+        try {
+            await openDecks(page, [['a.html', deckA]]);
+            await waitForDeck(page, 'a.html');
+            await page.click('#btn-pen');
+            await page.waitForFunction(() => document.getElementById('app').dataset.quartoExcalToolpanelReady === '1');
+            // A re-created panel has none of the inline styles set when it opened.
+            await page.evaluate(() => document.querySelector('#excalidraw-host .selected-shape-actions').removeAttribute('style'));
+            await page.waitForTimeout(500); // the panel slides in for 0.3s
+            const pos = await page.evaluate(() => {
+                const island = document.querySelector('#excalidraw-host .selected-shape-actions .Island').getBoundingClientRect();
+                const bar = document.getElementById('goodnotes-top-bar').getBoundingClientRect();
+                const hit = document.elementFromPoint(island.left + 60, island.top + 12);
+                return { islandTop: island.top, barBottom: bar.bottom, onTop: !!(hit && hit.closest('.selected-shape-actions')) };
+            });
+            assert.ok(pos.islandTop >= pos.barBottom, `panel starts below the toolbar (${pos.islandTop} >= ${pos.barBottom})`);
+            assert.ok(pos.onTop, 'nothing covers the panel');
+            assert.deepEqual(errors, []);
+        } finally {
+            await context.close();
+        }
+    });
+
+    it('fits a section progress bar of the deck into a narrow frame', async () => {
+        const { page, context, errors } = await openApp(browser, server, { viewport: { width: 900, height: 700 } });
+        try {
+            // The progress-indicator plugin: one fixed row of sections that does not wrap.
+            const sections = Array.from({ length: 12 }, (_, i) => `<div class="indicator-section" style="margin:0 15px;width:110px;height:20px;flex-shrink:0">S${i}</div>`).join('');
+            const bar = `<div class="progress-indicator" style="position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:center;white-space:nowrap;padding:0 20px">${sections}</div>`;
+            await openDecks(page, [['bar.html', deckA.replace('</body>', `${bar}</body>`)]]);
+            await waitForDeck(page, 'bar.html');
+            const deck = page.frames().find((f) => f.parentFrame() === page.mainFrame() && /blob:|bar/.test(f.url()) && f !== page.mainFrame());
+            await deck.waitForFunction(() => document.querySelector('.progress-indicator').style.zoom !== '', null, { timeout: 5000 });
+            const fit = await deck.evaluate(() => {
+                const kids = [...document.querySelectorAll('.indicator-section')].map((k) => k.getBoundingClientRect());
+                return { left: kids[0].left, right: kids[kids.length - 1].right, width: innerWidth };
+            });
+            assert.ok(fit.left >= 0 && fit.right <= fit.width, `all sections inside the frame (${fit.left}..${fit.right} of ${fit.width})`);
+            assert.deepEqual(errors, []);
+        } finally {
+            await context.close();
+        }
+    });
+
+    it('keeps the panel settings of each tool across a reload', async () => {
+        const { page, context, errors } = await openApp(browser, server);
+        const appState = () => page.evaluate(() => {
+            const a = window.QuartoInkExcalidraw.getAPI().getAppState();
+            return { bg: a.currentItemBackgroundColor, fill: a.currentItemFillStyle, size: a.currentItemFontSize };
+        });
+        const pick = async (tool) => {
+            await page.click(`#btn-${tool}`);
+            await page.waitForFunction((t) => state.tool === t, tool);
+            await page.waitForTimeout(400);
+        };
+        try {
+            await openDecks(page, [['a.html', deckA]]);
+            await waitForDeck(page, 'a.html');
+            await pick('rect');
+            if (!(await page.evaluate(() => state.excalToolPanelOpen))) await page.click('#btn-rect');
+            await page.waitForFunction(() => document.getElementById('app').dataset.quartoExcalToolpanelReady === '1');
+            await page.waitForTimeout(400);
+            await page.click('#excalidraw-host .selected-shape-actions [data-testid="color-top-pick-#a5d8ff"]');
+            await page.click('#excalidraw-host .selected-shape-actions [data-testid="fill-cross-hatch"]');
+            await page.waitForTimeout(900);
+            assert.deepEqual(await appState(), { bg: '#a5d8ff', fill: 'cross-hatch', size: (await appState()).size });
+            await pick('pen');
+            assert.equal((await appState()).bg, 'transparent', 'the pen keeps its own (empty) fill');
+            await page.evaluate(() => window.QuartoInkExcalidraw.setTextFontSize(36));
+
+            await page.reload();
+            await page.waitForFunction(() => typeof window.processFileContent === 'function' && !!window.QuartoInkDocs);
+            await openDecks(page, [['a.html', deckA]]);
+            await waitForDeck(page, 'a.html');
+            await pick('rect');
+            const rect = await appState();
+            assert.equal(rect.bg, '#a5d8ff', 'rectangle fill colour kept');
+            assert.equal(rect.fill, 'cross-hatch', 'rectangle fill style kept');
+            await pick('pen');
+            assert.equal((await appState()).bg, 'transparent');
+            assert.equal(await page.evaluate(() => window.QuartoInkExcalidraw.getTextFontSize()), 36, 'text size kept');
             assert.deepEqual(errors, []);
         } finally {
             await context.close();

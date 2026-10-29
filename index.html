@@ -1611,11 +1611,15 @@ h1, h2, h3 {
 #excalidraw-host .excalidraw .selected-shape-actions {
     display: flex !important;
     position: fixed !important;
-    top: 55px !important;
+    /* Below the toolbar: --qi-tool-panel-top is kept current from JS (syncExcalToolPanelTop).
+       It lives on #app, not on this element, because Excalidraw re-creates the panel (e.g. when it
+       detects a pen) and inline styles set on it would be lost. */
+    top: var(--qi-tool-panel-top, 80px) !important;
     bottom: auto !important;
     left: 50% !important;
     flex-direction: row !important;
-    align-items: center !important;
+    /* Hang the panel from the top: centred, a taller (wrapped) panel grew upward under the toolbar. */
+    align-items: flex-start !important;
     justify-content: center !important;
     background: transparent !important;
     padding: 0 !important;
@@ -2786,6 +2790,7 @@ h1, h2, h3 {
 <script src="assets/ui/quarto-ink-audience.js" defer></script>
 <script src="assets/ui/quarto-ink-share.js" defer></script>
 <script src="assets/ui/quarto-ink-recorder.js" defer></script>
+<script src="assets/ui/quarto-ink-leave.js" defer></script>
     <script>
     (function() {
         var saved = localStorage.getItem('gn_theme');
@@ -2976,6 +2981,10 @@ h1, h2, h3 {
                 </button>
                 <button class="gn-btn" id="btn-audience" type="button" title="Audience window (for a projector)" aria-label="Audience window" aria-pressed="false">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4" width="19" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/><path d="M9 10.5l2 2 4-4.5"/></svg>
+                </button>
+                <!-- Shown on iPad in place of the audience window (assets/ui/quarto-ink-audience.js). -->
+                <button class="gn-btn" id="btn-add-page" type="button" title="Add a blank page after this slide (B)" aria-label="Add a blank page" hidden style="display:none">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M14 3v5h5"/><path d="M12 11v6M9 14h6"/></svg>
                 </button>
                 <button class="gn-btn" id="btn-fullscreen" type="button" title="Fullscreen" aria-pressed="false">
                     <svg id="fullscreen-icon-enter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
@@ -3674,6 +3683,9 @@ const APP_STORAGE_KEYS = [
     'gn_tool_widths',
     'gn_tool_colors',
     'gn_last_thickness_index',
+    'gn_tool_styles_v1',
+    'gn_saved_ink_v1',
+    'gn_ink_to_shape_v2',
     'gn_dock_pos',
     'gn_theme'
 ];
@@ -3751,25 +3763,36 @@ let excalToolPanelLayoutObserver = null;
 let excalToolPanelLayoutRaf = 0;
 let excalToolPanelLayoutInterval = 0;
 
+/** Puts the property panel just below the toolbar, whose height changes when it wraps onto two rows. */
+function syncExcalToolPanelTop() {
+    const appEl = _$('#app');
+    const bar = _$('#goodnotes-top-bar');
+    if (!appEl) return;
+    const bottom = bar ? bar.getBoundingClientRect().bottom : 84;
+    appEl.style.setProperty('--qi-tool-panel-top', `${Math.max(60, Math.round(bottom + 6))}px`);
+}
+if (typeof ResizeObserver === 'function') {
+    const watchToolbar = () => {
+        const bar = _$('#goodnotes-top-bar');
+        if (bar) new ResizeObserver(syncExcalToolPanelTop).observe(bar);
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watchToolbar);
+    else watchToolbar();
+}
+window.addEventListener('resize', syncExcalToolPanelTop);
+
 function forceHorizontalExcalidrawToolPanelLayout() {
     const host = _$('#excalidraw-host');
     if (!host || state.annotationEngine !== 'excalidraw' || !state.excalToolPanelOpen) return;
     const appEl = _$('#app');
     const TOOL_PANEL_OFFSET_Y = 25; /* Changed from 60 to move the toolbar up */
-    const settingsBar = _$('#goodnotes-top-bar');
+    syncExcalToolPanelTop();
     const selectedPanel = host.querySelector('.selected-shape-actions');
-    if (selectedPanel) {
-        let dynamicTop = 94;
-        if (settingsBar) {
-            const r = settingsBar.getBoundingClientRect();
-            dynamicTop = Math.max(70, Math.round(r.bottom + 10));
-        }
-        selectedPanel.style.setProperty('top', `${dynamicTop + TOOL_PANEL_OFFSET_Y}px`, 'important');
-        selectedPanel.style.setProperty('margin-top', '0', 'important');
-    }
+    if (selectedPanel) selectedPanel.style.setProperty('margin-top', '0', 'important');
     const islands = host.querySelectorAll('.selected-shape-actions .Island, .App-menu_top .Island, .App-menu_bottom .Island');
     islands.forEach((island) => {
-        island.style.setProperty('margin-top', `${TOOL_PANEL_OFFSET_Y}px`, 'important');
+        const inPanel = !!island.closest('.selected-shape-actions');
+        island.style.setProperty('margin-top', inPanel ? '0' : `${TOOL_PANEL_OFFSET_Y}px`, 'important');
         island.style.setProperty('display', 'flex', 'important');
         island.style.setProperty('flex-direction', 'row', 'important');
         island.style.setProperty('align-items', 'flex-start', 'important');
@@ -4660,7 +4683,7 @@ function loadScriptOnce(src) {
 
 async function ensureExcalidrawRuntime() {
     window.EXCALIDRAW_ASSET_PATH = new URL('excalidraw-widget/dist/', window.location.href).href;
-    const src = 'excalidraw-widget/dist/quarto-ink-excalidraw.js?v=4439f1de67';
+    const src = 'excalidraw-widget/dist/quarto-ink-excalidraw.js?v=dc7cb77415';
     const vm = src.match(/[?&]v=([^&]+)/);
     const wantV = vm ? vm[1] : '';
     const ok =
@@ -5322,8 +5345,19 @@ function getSlideAnnotationCount(slideKey) {
     return count;
 }
 function saveToLocalStorage() {
-    try { 
+    saveToolPrefs();
+    try {
         qiSetAnnotations(getStorageKey(), stringifyAnnotationsPayload());
+    } catch (e) {
+        // Usually QuotaExceededError: the browser storage limit (~5 MB) is full.
+        console.warn('[Storage] Failed to save annotations:', e);
+        window.log(`Could not save annotations to browser storage (${e.name || 'error'}). Export your work to keep it.`, 'error');
+    }
+}
+
+/** Tool settings (colours, widths, presets), saved on their own so a full annotation store cannot lose them. */
+function saveToolPrefs() {
+    try {
         localStorage.setItem('gn_thickness_presets', JSON.stringify(state.thicknessPresets));
         localStorage.setItem(
             'gn_thickness_presets_v2',
@@ -5334,9 +5368,7 @@ function saveToLocalStorage() {
         localStorage.setItem('gn_last_thickness_index', state.thicknessIndex.toString());
         localStorage.setItem('gn_ink_to_shape_v2', state.inkToShapeEnabled ? '1' : '0');
     } catch (e) {
-        // Usually QuotaExceededError: the browser storage limit (~5 MB) is full.
-        console.warn('[Storage] Failed to save annotations:', e);
-        window.log(`Could not save annotations to browser storage (${e.name || 'error'}). Export your work to keep it.`, 'error');
+        console.warn('[Storage] Failed to save tool settings:', e);
     }
 }
 
@@ -6288,6 +6320,42 @@ window.processFileContent = function(content, file) {
                             }, QI_PARENT_ORIGIN);
                             notify(false);
                         });
+                        // Section progress bars of the progress-indicator plugin are one row that does not
+                        // wrap: in a frame narrower than the window they were made for (an iPad, a sidebar
+                        // open) they run off both edges. Shrink such a bar until it fits.
+                        var qiFitTimer = 0;
+                        var qiFittedBars = [];
+                        function qiFitProgressBars() {
+                            document.querySelectorAll('.progress-indicator').forEach(function(bar) {
+                                if (qiFittedBars.indexOf(bar) < 0) {
+                                    qiFittedBars.push(bar);
+                                    new MutationObserver(qiScheduleFit).observe(bar, { childList: true, subtree: true });
+                                }
+                                bar.style.zoom = '';
+                                var left = Infinity, right = -Infinity;
+                                Array.prototype.forEach.call(bar.children, function(kid) {
+                                    var r = kid.getBoundingClientRect();
+                                    if (!(r.width > 0)) return;
+                                    var ks = getComputedStyle(kid);
+                                    left = Math.min(left, r.left - (parseFloat(ks.marginLeft) || 0));
+                                    right = Math.max(right, r.right + (parseFloat(ks.marginRight) || 0));
+                                });
+                                if (!(right > left)) return;
+                                var bs = getComputedStyle(bar);
+                                var avail = bar.clientWidth - (parseFloat(bs.paddingLeft) || 0) - (parseFloat(bs.paddingRight) || 0);
+                                var need = right - left;
+                                if (avail > 0 && need > avail + 1) bar.style.zoom = String(Math.max(0.4, (avail / need) * 0.98));
+                            });
+                        }
+                        function qiScheduleFit() {
+                            clearTimeout(qiFitTimer);
+                            qiFitTimer = setTimeout(qiFitProgressBars, 60);
+                        }
+                        window.addEventListener('resize', qiScheduleFit);
+                        window.Reveal.on('ready', qiScheduleFit);
+                        window.Reveal.on('slidechanged', qiScheduleFit);
+                        [0, 600, 1800].forEach(function(ms) { setTimeout(qiFitProgressBars, ms); });
+
                         window.addEventListener('resize', () => {
                              const slide = window.Reveal.getCurrentSlide();
                              if (slide) {
