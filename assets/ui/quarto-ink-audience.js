@@ -222,26 +222,31 @@
     window.addEventListener('pointercancel', endLaser, true);
 
     // An iPad opens the window as one more tab and mirrors its own screen to a projector, so
-    // there is no second screen to send it to: the button gives its place to "add a blank page".
+    // there is no second screen to send it to: the button is hidden there. So is recording,
+    // which iPad Safari cannot do (no screen capture).
     function isIPad() {
         const ua = navigator.userAgent || '';
         return /iPad/.test(ua) || (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1);
     }
 
+    function hide(el) {
+        if (!el) return;
+        el.hidden = true;
+        el.style.display = 'none';
+    }
+
     function init() {
+        const addPage = document.getElementById('btn-add-page');
+        if (addPage) {
+            addPage.addEventListener('click', () => {
+                if (window.QuartoInkWhiteboard) window.QuartoInkWhiteboard.add();
+            });
+        }
         const btn = document.getElementById('btn-audience');
         if (!btn) return;
         if (isIPad()) {
-            btn.hidden = true;
-            btn.style.display = 'none';
-            const addPage = document.getElementById('btn-add-page');
-            if (addPage) {
-                addPage.hidden = false;
-                addPage.style.display = '';
-                addPage.addEventListener('click', () => {
-                    if (window.QuartoInkWhiteboard) window.QuartoInkWhiteboard.add();
-                });
-            }
+            hide(btn);
+            hide(document.getElementById('btn-record'));
             return;
         }
         btn.addEventListener('click', open);

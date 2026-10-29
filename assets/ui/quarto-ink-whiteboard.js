@@ -218,13 +218,33 @@
         chip.id = 'qi-whiteboard-chip';
         chip.setAttribute('role', 'toolbar');
         chip.setAttribute('aria-label', 'Blank page');
-        chip.innerHTML = '<span class="qi-wb-title"></span>'
+        // Folded to a small tab in the sheet's corner, so it does not cover the page: a tap on
+        // it shows the paper styles and delete.
+        chip.innerHTML = '<button type="button" class="qi-wb-toggle" aria-expanded="false" title="Page options">'
+            + '<span class="qi-wb-title"></span>'
+            + '<svg class="qi-wb-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>'
             + '<span class="qi-wb-styles">' + STYLES.map((s) => `<button type="button" data-style="${s}">${STYLE_LABELS[s]}</button>`).join('') + '</span>'
             + '<button type="button" class="qi-wb-delete" title="Delete this blank page" aria-label="Delete this blank page">'
             + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>';
         stage.appendChild(chip);
-        chip.querySelectorAll('[data-style]').forEach((b) => b.addEventListener('click', () => setStyle(b.dataset.style)));
-        chip.querySelector('.qi-wb-delete').addEventListener('click', () => { void remove(); });
+        chip.querySelector('.qi-wb-toggle').addEventListener('click', () => setChipOpen(!chip.classList.contains('is-open')));
+        chip.querySelectorAll('[data-style]').forEach((b) => b.addEventListener('click', () => {
+            setStyle(b.dataset.style);
+            setChipOpen(false);
+        }));
+        chip.querySelector('.qi-wb-delete').addEventListener('click', () => {
+            setChipOpen(false);
+            void remove();
+        });
+        document.addEventListener('pointerdown', (e) => {
+            if (chip.classList.contains('is-open') && !chip.contains(e.target)) setChipOpen(false);
+        }, true);
+    }
+
+    function setChipOpen(open) {
+        if (!chip) return;
+        chip.classList.toggle('is-open', !!open);
+        chip.querySelector('.qi-wb-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
     }
 
     /** Show or hide the sheet and fit it to the slide box; tell the deck which keys to hold back. */
@@ -234,6 +254,7 @@
         document.body.classList.toggle('qi-on-whiteboard', !!cur);
         if (sheet) sheet.style.display = cur ? 'block' : 'none';
         if (chip) chip.style.display = cur ? 'flex' : 'none';
+        if (!cur) setChipOpen(false);
         if (cur && sheet) {
             // The whole slide area: the export maps the page's ink onto it.
             const m = state.slidesBox || state.slideMetrics || { x: 0, y: 0, width: 0, height: 0 };
@@ -242,9 +263,10 @@
             Object.assign(sheet.style, cssBackground(cur.page.style, scale, m.x, m.y));
             const box = sheet.firstElementChild;
             Object.assign(box.style, { left: `${m.x}px`, top: `${m.y}px`, width: `${m.width}px`, height: `${m.height}px` });
-            chip.style.left = `${Math.max(8, m.x + 10)}px`;
-            chip.style.top = `${Math.max(8, m.y + 10)}px`;
-            chip.querySelector('.qi-wb-title').textContent = `Blank page ${cur.index + 1}`;
+            // The sheet's top-left corner, outside the slide area where the ink goes.
+            chip.style.left = '8px';
+            chip.style.top = '8px';
+            chip.querySelector('.qi-wb-title').textContent = `Page ${cur.index + 1}`;
             chip.querySelectorAll('[data-style]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.style === cur.page.style ? 'true' : 'false'));
         }
         updateIndicator(cur);

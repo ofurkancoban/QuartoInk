@@ -806,15 +806,34 @@ button.gn-color-swatch:focus-visible,
     position: absolute;
     z-index: 14; /* above the drawing layer, so it stays clickable */
     align-items: center;
-    gap: 8px;
-    padding: 4px 6px 4px 12px;
+    gap: 6px;
+    padding: 2px;
     border: 1px solid var(--qi-line);
     border-radius: 999px;
     background: var(--surface-glass-strong);
-    box-shadow: 2px 2px 0 var(--qi-hard-shadow);
+    box-shadow: 1px 1px 0 var(--qi-hard-shadow);
     font-size: 0.76rem;
     color: var(--text-secondary);
+    opacity: 0.8;
+    transition: opacity 0.2s;
 }
+#qi-whiteboard-chip:hover,
+#qi-whiteboard-chip.is-open { opacity: 1; padding-right: 6px; }
+/* Folded: only the page tab. Open: the paper styles and delete as well. */
+#qi-whiteboard-chip:not(.is-open) .qi-wb-styles,
+#qi-whiteboard-chip:not(.is-open) .qi-wb-delete { display: none; }
+.qi-wb-toggle {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    border: 0;
+    background: transparent;
+    padding: 3px 8px 3px 10px;
+    border-radius: 999px;
+    cursor: pointer;
+}
+.qi-wb-chevron { width: 12px; height: 12px; color: var(--text-dim); transition: transform 0.2s; }
+#qi-whiteboard-chip.is-open .qi-wb-chevron { transform: rotate(180deg); }
 .qi-wb-title {
     font-family: var(--qi-font-hand);
     font-size: 0.86rem;

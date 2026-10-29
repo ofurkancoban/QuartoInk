@@ -91,6 +91,8 @@ describe('Blank pages', () => {
             // Deleting it asks first, as it has ink.
             await page.evaluate(() => window.QuartoInkWhiteboard.enter('0-0', window.QuartoInkWhiteboard.pages('0-0')[0].id));
             await waitWhere(page, '0-0 page 1');
+            assert.equal(await page.isVisible('#qi-whiteboard-chip .qi-wb-delete'), false, 'the page tab starts folded');
+            await page.click('#qi-whiteboard-chip .qi-wb-toggle');
             await page.click('#qi-whiteboard-chip .qi-wb-delete');
             await page.locator('.qi-dialog-card button', { hasText: 'Delete page' }).click();
             await waitWhere(page, '0-0');

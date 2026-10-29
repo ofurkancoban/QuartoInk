@@ -19,11 +19,16 @@ describe('Audience window', () => {
         await server.close();
     });
 
-    it('hides "add a blank page" on a computer', async () => {
+    it('shows the add-page, audience and record buttons on a computer', async () => {
         const { page, context, errors } = await openApp(browser, server);
         try {
-            assert.equal(await page.isVisible('#btn-add-page'), false);
+            assert.equal(await page.isVisible('#btn-add-page'), true);
             assert.equal(await page.isVisible('#btn-audience'), true);
+            assert.equal(await page.isVisible('#btn-record'), true);
+            await openDecks(page, [['talk.html', deckA]]);
+            await waitForDeck(page, 'talk.html');
+            await page.click('#btn-add-page');
+            await page.waitForFunction(() => window.QuartoInkWhiteboard.pages('0-0').length === 1);
             assert.deepEqual(errors, []);
         } finally {
             await context.close();
@@ -121,7 +126,7 @@ describe('Audience window', () => {
         }
     });
 
-    it('shows "add a blank page" in place of the audience button on an iPad', async () => {
+    it('hides the audience and record buttons on an iPad, and adds pages from the toolbar', async () => {
         // iPadOS Safari reports itself as a Mac with a touch screen.
         const context = await browser.newContext({
             viewport: { width: 1180, height: 820 },
@@ -135,7 +140,8 @@ describe('Audience window', () => {
         const { page, errors } = await openApp(browser, server, { context });
         try {
             assert.equal(await page.isVisible('#btn-audience'), false);
-            assert.equal(await page.isVisible('#btn-record'), true, 'other buttons stay');
+            assert.equal(await page.isVisible('#btn-record'), false, 'no screen capture on iPad');
+            assert.equal(await page.isVisible('#btn-fullscreen'), true, 'other buttons stay');
             await openDecks(page, [['talk.html', deckA]]);
             await waitForDeck(page, 'talk.html');
             await page.evaluate(() => window.closeIOSPopup && window.closeIOSPopup()); // "Add to Home Screen" prompt
