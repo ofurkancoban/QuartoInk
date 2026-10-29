@@ -1567,12 +1567,12 @@ h1, h2, h3 {
     filter: none !important;
     -webkit-filter: none !important;
 }
-/* Pen vs highlighter: first top-pick matches each palette’s first swatch. */
-#app[data-stroke-palette="pen"] #excalidraw-host .excalidraw .color-picker__top-picks .color-picker__button:first-of-type {
+/* Pen vs highlighter: first stroke top-pick matches each palette’s first swatch (not the fill row's "none"). */
+#app[data-stroke-palette="pen"] #excalidraw-host .excalidraw .color-picker__top-picks[data-qi-stroke-picks] .color-picker__button:first-of-type {
     background-color: #000000 !important;
     filter: none !important;
 }
-#app[data-stroke-palette="highlighter"] #excalidraw-host .excalidraw .color-picker__top-picks .color-picker__button:first-of-type {
+#app[data-stroke-palette="highlighter"] #excalidraw-host .excalidraw .color-picker__top-picks[data-qi-stroke-picks] .color-picker__button:first-of-type {
     background-color: #6366f1 !important;
     filter: none !important;
 }
@@ -3746,15 +3746,30 @@ function applyToolbarSwatchPalette() {
     });
 }
 
+/**
+ * The stroke colours of the property panel are the toolbar's (pen or highlighter palette), so
+ * both pick the same colours. Excalidraw keeps its own values on the buttons, so the app paints
+ * them, handles their clicks (installExcalidrawIslandTopPickOverride) and marks the current
+ * colour itself (data-qi-active; React would overwrite a class). The panel's first colour row
+ * is the stroke; the fill row below stays Excalidraw's own.
+ */
+function getExcalidrawStrokePickRow(host) {
+    return host ? host.querySelector('.color-picker__top-picks') : null;
+}
+
 function syncExcalidrawIslandTopPickVisuals() {
     const host = _$('#excalidraw-host');
-    if (!host) return;
+    const row = getExcalidrawStrokePickRow(host);
+    if (!row) return;
     const pal = getSwatchPaletteForTool(state.tool);
-    host.querySelectorAll('.color-picker__top-picks').forEach((row) => {
-        const buttons = row.querySelectorAll('.color-picker__button');
-        buttons.forEach((b, idx) => {
-            if (idx < pal.length) b.style.setProperty('background-color', pal[idx], 'important');
-        });
+    const current = normalizeColorHex(state.toolColors[state.tool] || state.color || STROKE_BLACK);
+    row.dataset.qiStrokePicks = '1';
+    row.querySelectorAll('.color-picker__button').forEach((b, idx) => {
+        if (idx >= pal.length) return;
+        b.style.setProperty('background-color', pal[idx], 'important');
+        b.dataset.qiColor = pal[idx];
+        if (normalizeColorHex(pal[idx]) === current) b.dataset.qiActive = '1';
+        else delete b.dataset.qiActive;
     });
 }
 
@@ -3762,13 +3777,19 @@ let excalToolPanelLayoutObserver = null;
 let excalToolPanelLayoutRaf = 0;
 let excalToolPanelLayoutInterval = 0;
 
-/** Puts the property panel just below the toolbar, whose height changes when it wraps onto two rows. */
+/**
+ * Puts the property panel below the toolbar (whose height changes when it wraps onto two rows)
+ * and inside the workspace: on iPad, WebKit clips the fixed panel to the workspace (its
+ * rounded, overflow-hidden box), so a panel starting above it lost its top part.
+ */
 function syncExcalToolPanelTop() {
     const appEl = _$('#app');
     const bar = _$('#goodnotes-top-bar');
+    const workspace = _$('#workspace');
     if (!appEl) return;
-    const bottom = bar ? bar.getBoundingClientRect().bottom : 84;
-    appEl.style.setProperty('--qi-tool-panel-top', `${Math.max(60, Math.round(bottom + 6))}px`);
+    const barBottom = bar ? bar.getBoundingClientRect().bottom : 84;
+    const workspaceTop = workspace ? workspace.getBoundingClientRect().top : 0;
+    appEl.style.setProperty('--qi-tool-panel-top', `${Math.max(60, Math.round(Math.max(barBottom, workspaceTop) + 6))}px`);
 }
 if (typeof ResizeObserver === 'function') {
     const watchToolbar = () => {
@@ -3903,6 +3924,16 @@ function installExcalidrawIslandTopPickOverride() {
     const host = _$('#excalidraw-host');
     if (!host || host.dataset.quartoTopPickOverride === '1') return;
     host.dataset.quartoTopPickOverride = '1';
+    // Excalidraw re-creates the panel (other tool, pen detected): paint the new stroke row too.
+    let repaint = 0;
+    new MutationObserver(() => {
+        const row = getExcalidrawStrokePickRow(host);
+        if (!row || row.dataset.qiStrokePicks === '1' || repaint) return;
+        repaint = requestAnimationFrame(() => {
+            repaint = 0;
+            syncExcalidrawIslandTopPickVisuals();
+        });
+    }).observe(host, { childList: true, subtree: true });
     host.addEventListener(
         'click',
         (e) => {
@@ -3910,7 +3941,8 @@ function installExcalidrawIslandTopPickOverride() {
             const btn = e.target && e.target.closest && e.target.closest('.color-picker__top-picks .color-picker__button');
             if (!btn || !host.contains(btn)) return;
             const row = btn.closest('.color-picker__top-picks');
-            if (!row) return;
+            // Only the stroke row: the fill row keeps Excalidraw's own colours and handling.
+            if (!row || row !== getExcalidrawStrokePickRow(host)) return;
             const buttons = row.querySelectorAll('.color-picker__button');
             let idx = -1;
             for (let j = 0; j < buttons.length; j++) {
@@ -3923,14 +3955,16 @@ function installExcalidrawIslandTopPickOverride() {
             const pal = getSwatchPaletteForTool(state.tool);
             if (idx >= pal.length) return;
             const hex = pal[idx];
-            queueMicrotask(() => {
-                try {
-                    state.toolColors[state.tool] = hex;
-                    window.QuartoInkExcalidraw.setCurrentItemStrokeColor(hex);
-                    syncColorUI();
-                    saveToLocalStorage();
-                } catch (_err) {}
-            });
+            // Excalidraw would set its own colour behind the painted one: the app sets it instead.
+            e.preventDefault();
+            e.stopPropagation();
+            try {
+                state.toolColors[state.tool] = hex;
+                window.QuartoInkExcalidraw.setCurrentItemStrokeColor(hex);
+                if (window.QuartoInkExcalidraw.setSelectionStrokeColor) window.QuartoInkExcalidraw.setSelectionStrokeColor(hex);
+                syncColorUI();
+                saveToLocalStorage();
+            } catch (_err) {}
         },
         true
     );
@@ -4682,7 +4716,7 @@ function loadScriptOnce(src) {
 
 async function ensureExcalidrawRuntime() {
     window.EXCALIDRAW_ASSET_PATH = new URL('excalidraw-widget/dist/', window.location.href).href;
-    const src = 'excalidraw-widget/dist/quarto-ink-excalidraw.js?v=dc7cb77415';
+    const src = 'excalidraw-widget/dist/quarto-ink-excalidraw.js?v=ba0cb4c1ec';
     const vm = src.match(/[?&]v=([^&]+)/);
     const wantV = vm ? vm[1] : '';
     const ok =
@@ -8956,6 +8990,10 @@ function setupEventListeners() {
             state.toolColors[state.tool] = hex;
             syncColorUI();
             saveToLocalStorage();
+            // Selected shapes take the colour, as from the panel's stroke colours.
+            if (state.annotationEngine === 'excalidraw' && window.QuartoInkExcalidraw && window.QuartoInkExcalidraw.setSelectionStrokeColor) {
+                window.QuartoInkExcalidraw.setSelectionStrokeColor(hex);
+            }
 
             // Apply to selected annotations if any
             if (state.selectedAnnotations && state.selectedAnnotations.length > 0) {
@@ -8971,6 +9009,9 @@ function setupEventListeners() {
         state.toolColors[state.tool] = e.target.value;
         syncColorUI();
         saveToLocalStorage();
+        if (state.annotationEngine === 'excalidraw' && window.QuartoInkExcalidraw && window.QuartoInkExcalidraw.setSelectionStrokeColor) {
+            window.QuartoInkExcalidraw.setSelectionStrokeColor(e.target.value);
+        }
 
         // Apply to selected annotations if any
         if (state.selectedAnnotations && state.selectedAnnotations.length > 0) {

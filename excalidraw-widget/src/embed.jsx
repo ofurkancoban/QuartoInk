@@ -246,6 +246,39 @@ function isDefaultCamera(scrollX, scrollY, zoom) {
   return scrollX === 0 && scrollY === 0 && (zoom?.value ?? 1) === 1;
 }
 
+// Blank pages are not tied to a slide: there the camera may zoom and pan (set by the host).
+let cameraFree = false;
+
+function setCameraFree(on) {
+  cameraFree = !!on;
+  if (cameraFree) return;
+  const api = excalidrawRootRef.current;
+  if (!api) return;
+  const appState = api.getAppState();
+  if (isDefaultCamera(appState.scrollX, appState.scrollY, appState.zoom)) return;
+  try {
+    api.updateScene({ appState: createDefaultCamera(), commitToHistory: false });
+  } catch {}
+}
+
+function notifyCamera() {
+  window.dispatchEvent(new CustomEvent("quartoink:camera"));
+}
+
+/** Bounds of the ink of a serialized scene ([minX, minY, maxX, maxY]), or null when it has none. */
+function getSceneBounds(sceneSerialized) {
+  if (!sceneSerialized || typeof sceneSerialized !== "string") return null;
+  try {
+    const restored = restore(JSON.parse(sceneSerialized), null, null);
+    const live = getNonDeletedElements(filterElementsForSync(restored.elements));
+    if (!live.length) return null;
+    const bounds = getCommonBounds(live);
+    return bounds.every(Number.isFinite) ? bounds : null;
+  } catch {
+    return null;
+  }
+}
+
 // Convert serialized state to restoration properties
 function getRestorationScene(props) {
   const { sceneSerialized, initialToolbarStroke, initialToolbarStrokeWidth, initialQuartoTool, uiTheme } = props || {};
@@ -329,7 +362,10 @@ function syncStateFromHost(iframeRef, props) {
 
     const preserveMenu = props && props.preserveShapeMenu ? "shape" : null;
     const sceneElements = Array.isArray(parsed.elements) && parsed.elements.length > 0 ? parsed.elements : [];
-    const camera = createDefaultCamera();
+    // A re-sync on a zoomed blank page keeps the user's view.
+    const camera = cameraFree && isSameSlide
+      ? { scrollX: appState.scrollX, scrollY: appState.scrollY, zoom: appState.zoom }
+      : createDefaultCamera();
 
     isUpdatingScene = true;
     try {
@@ -992,6 +1028,10 @@ function ExcalidrawWidget(props) {
 
   const onScrollChange = useCallback((scrollX, scrollY, zoom) => {
     requestEraserFrameCallback();
+    if (cameraFree) {
+      notifyCamera();
+      return;
+    }
     if (isDefaultCamera(scrollX, scrollY, zoom)) return;
     const api = excalidrawRootRef.current;
     if (!api) return;
@@ -1010,6 +1050,7 @@ function ExcalidrawWidget(props) {
     if (!host) return undefined;
     const onWheel = (e) => {
       if (e.target instanceof Element && e.target.closest('.Island, .layer-ui__wrapper__top-right, .dropdown-menu')) return;
+      if (cameraFree) return; // a blank page: Excalidraw zooms and pans
       e.preventDefault();
       e.stopPropagation();
     };
@@ -1425,6 +1466,21 @@ function setCurrentItemStrokeColor(color) {
   } catch {}
 }
 
+/** Recolour the selected shapes' strokes, as a stroke colour picked in the panel does. */
+function setSelectionStrokeColor(color) {
+  const api = excalidrawRootRef.current;
+  if (!api || typeof color !== 'string') return;
+  try {
+    const selected = api.getAppState().selectedElementIds || {};
+    if (!Object.keys(selected).length) return;
+    const hexColor = normalizeColorToHex(color);
+    const elements = api.getSceneElementsIncludingDeleted().map((el) => (
+      selected[el.id] && !el.isDeleted && el.strokeColor !== hexColor ? newElementWith(el, { strokeColor: hexColor }) : el
+    ));
+    api.updateScene({ elements, captureUpdate: "IMMEDIATELY" });
+  } catch {}
+}
+
 function setCurrentItemStrokeWidth(width) {
   const api = excalidrawRootRef.current;
   if (!api || typeof width !== 'number' || !Number.isFinite(width)) return;
@@ -1602,6 +1658,8 @@ window.QuartoInkExcalidraw = {
   isReadyForInput,
   captureSceneSerialized,
   exportSerializedToSvg,
+  getSceneBounds,
+  setCameraFree,
   getAPI,
   getTextFontSize,
   setTextFontSize,
@@ -1610,6 +1668,7 @@ window.QuartoInkExcalidraw = {
   openImagePicker,
   setExcalidrawShapeMenuOpen,
   setCurrentItemStrokeColor,
+  setSelectionStrokeColor,
   setCurrentItemStrokeWidth,
   setCurrentItemOpacity,
   setTheme,

@@ -600,6 +600,7 @@
         try {
             const whiteboard = window.QuartoInkWhiteboard && window.QuartoInkWhiteboard.current();
             let page;
+            let box = saved.box;
             if (whiteboard) {
                 // A blank page: its paper, sized like a rendered slide page.
                 const { width, height } = saved.size;
@@ -609,11 +610,16 @@
                     height,
                     slideRect: await agentCall('slidesRect'),
                 };
-                page = window.QuartoInkWhiteboard.renderPage(template, whiteboard.page.style, width);
+                // All of the page's ink, also what lies outside the slide area.
+                const fit = annotations
+                    ? window.QuartoInkWhiteboard.exportBox(whiteboard.slideKey, whiteboard.id, saved.box)
+                    : { box, factor: 1 };
+                box = fit.box;
+                page = window.QuartoInkWhiteboard.renderPage(template, whiteboard.page.style, width, { ...fit, slideBox: saved.box });
             } else {
                 page = await renderSlide();
             }
-            if (annotations) await drawInk(page, state.currentSlide, getCurrentAnnotationKey(), saved.box);
+            if (annotations) await drawInk(page, state.currentSlide, getCurrentAnnotationKey(), box);
             return page.canvas;
         } finally {
             await leavePrintLayout(saved);
@@ -700,8 +706,10 @@
                 const whiteboards = annotations && template && window.QuartoInkWhiteboard ? window.QuartoInkWhiteboard.pages(slideKey) : [];
                 for (const board of whiteboards) {
                     if (current.cancelled) break;
-                    const page = window.QuartoInkWhiteboard.renderPage(template, board.style, layout.size.width);
-                    await drawInk(page, slideKey, window.QuartoInkWhiteboard.keyOf(slideKey, board.id), layout.box);
+                    // All of the page's ink, also what lies outside the slide area.
+                    const fit = window.QuartoInkWhiteboard.exportBox(slideKey, board.id, layout.box);
+                    const page = window.QuartoInkWhiteboard.renderPage(template, board.style, layout.size.width, { ...fit, slideBox: layout.box });
+                    await drawInk(page, slideKey, window.QuartoInkWhiteboard.keyOf(slideKey, board.id), fit.box);
                     const jpeg = canvasToBlob(page.canvas, 'image/jpeg', JPEG_QUALITY)
                         .then(async (blob) => new Uint8Array(await blob.arrayBuffer()));
                     jpeg.catch(() => {});

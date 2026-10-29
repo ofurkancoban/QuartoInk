@@ -68,16 +68,20 @@
         sheet.style.display = board ? 'block' : 'none';
         if (!board) return;
         const box = slidesBox || { x: 0, y: 0, width: window.innerWidth };
-        const step = SPACING * (slideWidth ? box.width / slideWidth : 1);
+        // The presenter may have zoomed and panned the page: the lines follow.
+        const zoom = board.zoom || 1;
+        const step = SPACING * (slideWidth ? box.width / slideWidth : 1) * zoom;
+        const x = box.x + (board.dx || 0) * box.width;
+        const y = box.y + (board.dy || 0) * box.width;
         const line = 'rgba(29, 27, 23, 0.09)';
         if (board.style === 'grid') {
             sheet.style.backgroundImage = `linear-gradient(${line} 1px, transparent 1px), linear-gradient(90deg, ${line} 1px, transparent 1px)`;
             sheet.style.backgroundSize = `${step}px ${step}px`;
-            sheet.style.backgroundPosition = `${box.x}px ${box.y}px`;
+            sheet.style.backgroundPosition = `${x}px ${y}px`;
         } else if (board.style === 'lines') {
             sheet.style.backgroundImage = `linear-gradient(${line} 1px, transparent 1px)`;
             sheet.style.backgroundSize = `100% ${step}px`;
-            sheet.style.backgroundPosition = `0 ${box.y}px`;
+            sheet.style.backgroundPosition = `0 ${y}px`;
         } else {
             sheet.style.backgroundImage = 'none';
         }

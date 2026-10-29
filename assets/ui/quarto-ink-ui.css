@@ -798,7 +798,6 @@ button.gn-color-swatch:focus-visible,
 }
 .qi-wb-slide-box {
     position: absolute;
-    outline: 1px dashed rgba(29, 27, 23, 0.16);
     pointer-events: none;
 }
 #qi-whiteboard-chip {
@@ -821,7 +820,9 @@ button.gn-color-swatch:focus-visible,
 #qi-whiteboard-chip.is-open { opacity: 1; padding-right: 6px; }
 /* Folded: only the page tab. Open: the paper styles and delete as well. */
 #qi-whiteboard-chip:not(.is-open) .qi-wb-styles,
-#qi-whiteboard-chip:not(.is-open) .qi-wb-delete { display: none; }
+#qi-whiteboard-chip:not(.is-open) .qi-wb-delete,
+#qi-whiteboard-chip:not(.is-open) .qi-wb-zoom { display: none; }
+.qi-wb-zoom[hidden] { display: none !important; }
 .qi-wb-toggle {
     display: flex;
     align-items: center;
@@ -841,6 +842,7 @@ button.gn-color-swatch:focus-visible,
 }
 .qi-wb-styles { display: flex; gap: 2px; padding: 2px; border-radius: 999px; background: var(--active-bg); }
 .qi-wb-styles button,
+.qi-wb-zoom,
 .qi-wb-delete {
     border: 0;
     background: transparent;
@@ -1907,6 +1909,21 @@ body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .color-pic
 body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .color-picker__button.active .color-picker__button-outline {
     box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--qi-ink) !important;
 }
+/* The ink keeps its colours in the dark theme, so the swatches do too (Excalidraw inverts them). */
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .color-picker__button { filter: none !important; }
+/* Stroke row: the app marks the current colour (Excalidraw's own mark follows its hidden values). */
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions [data-qi-stroke-picks] .color-picker__button.active:not([data-qi-active]) {
+    transform: rotate(-45deg);
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions [data-qi-stroke-picks] .color-picker__button.active:not([data-qi-active]) .color-picker__button-outline {
+    box-shadow: none !important;
+}
+/* On the button itself: Excalidraw sizes its outline element only for its own active colour. */
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions [data-qi-stroke-picks] .color-picker__button[data-qi-active] {
+    transform: rotate(-45deg) scale(1.12);
+    box-shadow: inset 0 -2px 3px rgba(0, 0, 0, 0.22), inset 0 2px 2px rgba(255, 255, 255, 0.25), 0 0 0 2px var(--surface), 0 0 0 3.5px var(--qi-ink) !important;
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions [data-qi-stroke-picks] .color-picker__button .color-picker__button-outline { display: none !important; }
 /* Divider before the "current colour" trigger becomes a squiggle */
 body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .color-picker__top-picks + div {
     width: 6px !important;

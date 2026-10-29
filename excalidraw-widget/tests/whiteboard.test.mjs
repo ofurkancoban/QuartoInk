@@ -145,4 +145,70 @@ describe('Blank pages', () => {
             await context.close();
         }
     });
+
+    it('zooms a blank page with a pinch, and fits all of its ink into the export', async (t) => {
+        if (process.env.QI_BROWSER === 'webkit') {
+            t.skip('touch input is emulated through Chromium');
+            return;
+        }
+        const context = await browser.newContext({ viewport: { width: 1280, height: 860 }, hasTouch: true });
+        const { page, errors } = await openApp(browser, server, { context });
+        const zoom = () => page.evaluate(() => window.QuartoInkExcalidraw.getAPI().getAppState().zoom.value);
+        try {
+            await openDecks(page, [['zoom.html', deckA]]);
+            await waitForDeck(page, 'zoom.html');
+            await page.keyboard.press('b');
+            await waitWhere(page, '0-0 page 1');
+            assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.qi-wb-slide-box')).outlineStyle), 'none', 'no dashed slide box');
+
+            // Two fingers moving apart zoom in.
+            const box = await (await page.$('#editor-stage')).boundingBox();
+            const cx = box.x + box.width / 2;
+            const cy = box.y + box.height / 2;
+            const cdp = await context.newCDPSession(page);
+            const touch = (type, d) => cdp.send('Input.dispatchTouchEvent', {
+                type,
+                touchPoints: type === 'touchEnd' ? [] : [{ x: cx - d, y: cy, id: 1 }, { x: cx + d, y: cy, id: 2 }],
+            });
+            await touch('touchStart', 60);
+            for (let d = 70; d <= 180; d += 10) {
+                await touch('touchMove', d);
+                await page.waitForTimeout(16);
+            }
+            await touch('touchEnd', 0);
+            await page.waitForTimeout(300);
+            const zoomed = await zoom();
+            assert.ok(zoomed > 2.5 && zoomed < 3.5, `pinched to about 3x (${zoomed})`);
+            assert.match(await page.textContent('#qi-whiteboard-chip .qi-wb-title'), /Page 1 · \d+%/);
+            assert.equal(await page.evaluate(() => state.currentWhiteboard !== null), true, 'the pinch did not swipe to another slide');
+
+            // Back to 100% from the page tab.
+            await page.click('#qi-whiteboard-chip .qi-wb-toggle');
+            await page.click('#qi-whiteboard-chip .qi-wb-zoom');
+            assert.equal(await zoom(), 1);
+
+            // Ink far outside the slide area still lands on the exported page.
+            const factor = await page.evaluate(() => {
+                const m = state.slidesBox;
+                const wb = window.QuartoInkWhiteboard.current();
+                state.excalidrawScenes.set(window.QuartoInkWhiteboard.keyOf(wb.slideKey, wb.id), JSON.stringify({
+                    type: 'excalidraw', version: 2, source: 'test',
+                    elements: [{ id: 'far', type: 'rectangle', x: m.x + m.width * 1.5, y: m.y, width: 100, height: 80, angle: 0, strokeColor: '#000', backgroundColor: 'transparent', fillStyle: 'solid', strokeWidth: 2, strokeStyle: 'solid', roughness: 0, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: 1, version: 1, versionNonce: 1, isDeleted: false, boundElements: null, updated: 1, link: null, locked: false }],
+                    appState: {}, files: {},
+                }));
+                const out = window.QuartoInkWhiteboard.exportBox(wb.slideKey, wb.id, m);
+                return { factor: out.factor, right: out.box.x + out.box.width, need: m.x + m.width * 1.5 + 100 };
+            });
+            assert.ok(factor.factor > 1.5, `export area grown to hold the ink (${factor.factor})`);
+            assert.ok(factor.right >= factor.need, 'the ink lies inside the exported area');
+
+            // Slides keep their fixed view.
+            await page.keyboard.press('ArrowLeft');
+            await waitWhere(page, '0-0');
+            assert.equal(await zoom(), 1);
+            assert.deepEqual(errors, []);
+        } finally {
+            await context.close();
+        }
+    });
 });

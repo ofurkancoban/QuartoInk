@@ -212,10 +212,13 @@ describe('Interface details', () => {
             const pos = await page.evaluate(() => {
                 const island = document.querySelector('#excalidraw-host .selected-shape-actions .Island').getBoundingClientRect();
                 const bar = document.getElementById('goodnotes-top-bar').getBoundingClientRect();
+                const workspace = document.getElementById('workspace').getBoundingClientRect();
                 const hit = document.elementFromPoint(island.left + 60, island.top + 12);
-                return { islandTop: island.top, barBottom: bar.bottom, onTop: !!(hit && hit.closest('.selected-shape-actions')) };
+                return { islandTop: island.top, barBottom: bar.bottom, workspaceTop: workspace.top, onTop: !!(hit && hit.closest('.selected-shape-actions')) };
             });
             assert.ok(pos.islandTop >= pos.barBottom, `panel starts below the toolbar (${pos.islandTop} >= ${pos.barBottom})`);
+            // On iPad, WebKit clips the panel to the workspace: it must start inside it.
+            assert.ok(pos.islandTop >= pos.workspaceTop, `panel starts inside the workspace (${pos.islandTop} >= ${pos.workspaceTop})`);
             assert.ok(pos.onTop, 'nothing covers the panel');
             assert.deepEqual(errors, []);
         } finally {
@@ -281,6 +284,69 @@ describe('Interface details', () => {
             await pick('pen');
             assert.equal((await appState()).bg, 'transparent');
             assert.equal(await page.evaluate(() => window.QuartoInkExcalidraw.getTextFontSize()), 36, 'text size kept');
+            assert.deepEqual(errors, []);
+        } finally {
+            await context.close();
+        }
+    });
+
+    it('keeps the panel stroke colours and the toolbar colours in step', async () => {
+        const { page, context, errors } = await openApp(browser, server, { colorScheme: 'dark' });
+        const look = () => page.evaluate(() => {
+            const row = document.querySelector('#excalidraw-host .color-picker__top-picks');
+            const buttons = [...row.querySelectorAll('.color-picker__button')];
+            const main = [...document.querySelectorAll('.gn-color-swatch:not(.custom-picker-btn)')];
+            return {
+                panel: buttons.slice(0, 5).map((b) => b.dataset.qiColor),
+                panelActive: buttons.findIndex((b) => b.dataset.qiActive === '1'),
+                mainColors: main.map((b) => b.dataset.color),
+                mainActive: main.findIndex((b) => b.classList.contains('active')),
+                excal: window.QuartoInkExcalidraw.getAPI().getAppState().currentItemStrokeColor,
+                bg: window.QuartoInkExcalidraw.getAPI().getAppState().currentItemBackgroundColor,
+                filter: getComputedStyle(buttons[1]).filter,
+            };
+        });
+        const openPanel = async (tool) => {
+            if (!(await page.evaluate((t) => state.tool === t && state.excalToolPanelOpen, tool))) await page.click(`#btn-${tool}`);
+            if (!(await page.evaluate(() => state.excalToolPanelOpen))) await page.click(`#btn-${tool}`);
+            await page.waitForFunction(() => document.getElementById('app').dataset.quartoExcalToolpanelReady === '1');
+            await page.waitForTimeout(400);
+        };
+        try {
+            await openDecks(page, [['a.html', deckA]]);
+            await waitForDeck(page, 'a.html');
+            await openPanel('pen');
+            let now = await look();
+            assert.deepEqual(now.panel, now.mainColors, 'same palette');
+            assert.equal(now.filter, 'none', 'true colours in the dark theme');
+
+            // Toolbar -> panel.
+            await page.click('.gn-color-swatch:not(.custom-picker-btn) >> nth=2');
+            await openPanel('pen');
+            now = await look();
+            assert.equal(now.panelActive, 2);
+            assert.equal(now.excal, now.mainColors[2]);
+
+            // Panel -> toolbar, with the toolbar's colour (not Excalidraw's own behind it).
+            await page.click('#excalidraw-host .color-picker__top-picks .color-picker__button >> nth=3');
+            await page.waitForTimeout(300);
+            now = await look();
+            assert.equal(now.mainActive, 3);
+            assert.equal(now.panelActive, 3);
+            assert.equal(now.excal, now.mainColors[3]);
+
+            // The fill row sets the fill only.
+            await page.click('#excalidraw-host .color-picker__top-picks >> nth=1 >> .color-picker__button >> nth=2');
+            await page.waitForTimeout(300);
+            now = await look();
+            assert.equal(now.excal, now.mainColors[3], 'stroke unchanged');
+            assert.notEqual(now.bg, 'transparent', 'fill set');
+
+            // The highlighter has its own palette, in both places.
+            await openPanel('highlighter');
+            now = await look();
+            assert.deepEqual(now.panel, now.mainColors);
+            assert.equal(now.panelActive, now.mainActive);
             assert.deepEqual(errors, []);
         } finally {
             await context.close();

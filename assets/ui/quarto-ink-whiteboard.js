@@ -8,7 +8,10 @@
  *
  * Next/Prev walk through a slide's pages before moving on; the bridge keeps Reveal from
  * skipping them when the deck has the keyboard (QI_NAV_LOCK). The PDF export puts each
- * page after its slide.
+ * page after its slide, with all of its ink fitted onto the page.
+ *
+ * Unlike slides, a page can be zoomed and panned: a two-finger pinch on a touch screen (done
+ * here, as a one-finger touch is a swipe to the next slide) or the trackpad (Excalidraw's own).
  */
 (function () {
     'use strict';
@@ -17,6 +20,8 @@
     const STYLE_LABELS = { plain: 'Plain', grid: 'Grid', lines: 'Lines' };
     // Grid and line spacing, in slide px (scaled with the slide on screen and in the export).
     const SPACING = 40;
+    const MIN_ZOOM = 0.3;
+    const MAX_ZOOM = 5;
 
     let sheet = null;
     let chip = null;
@@ -224,6 +229,7 @@
             + '<span class="qi-wb-title"></span>'
             + '<svg class="qi-wb-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>'
             + '<span class="qi-wb-styles">' + STYLES.map((s) => `<button type="button" data-style="${s}">${STYLE_LABELS[s]}</button>`).join('') + '</span>'
+            + '<button type="button" class="qi-wb-zoom" title="Back to 100%"></button>'
             + '<button type="button" class="qi-wb-delete" title="Delete this blank page" aria-label="Delete this blank page">'
             + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>';
         stage.appendChild(chip);
@@ -232,6 +238,10 @@
             setStyle(b.dataset.style);
             setChipOpen(false);
         }));
+        chip.querySelector('.qi-wb-zoom').addEventListener('click', () => {
+            setCamera(0, 0, 1);
+            setChipOpen(false);
+        });
         chip.querySelector('.qi-wb-delete').addEventListener('click', () => {
             setChipOpen(false);
             void remove();
@@ -252,6 +262,8 @@
         ensureElements();
         const cur = current();
         document.body.classList.toggle('qi-on-whiteboard', !!cur);
+        const excal = window.QuartoInkExcalidraw;
+        if (excal && excal.setCameraFree) excal.setCameraFree(!!cur);
         if (sheet) sheet.style.display = cur ? 'block' : 'none';
         if (chip) chip.style.display = cur ? 'flex' : 'none';
         if (!cur) setChipOpen(false);
@@ -260,13 +272,19 @@
             const m = state.slidesBox || state.slideMetrics || { x: 0, y: 0, width: 0, height: 0 };
             const base = (state.baseSlideSize && state.baseSlideSize.width) || m.width || 1;
             const scale = m.width / base || 1;
-            Object.assign(sheet.style, cssBackground(cur.page.style, scale, m.x, m.y));
+            // The lines follow the page's zoom and pan (scene -> screen: (p + scroll) * zoom).
+            const cam = camera();
+            Object.assign(sheet.style, cssBackground(cur.page.style, scale * cam.zoom, (m.x + cam.scrollX) * cam.zoom, (m.y + cam.scrollY) * cam.zoom));
             const box = sheet.firstElementChild;
             Object.assign(box.style, { left: `${m.x}px`, top: `${m.y}px`, width: `${m.width}px`, height: `${m.height}px` });
             // The sheet's top-left corner, outside the slide area where the ink goes.
             chip.style.left = '8px';
             chip.style.top = '8px';
-            chip.querySelector('.qi-wb-title').textContent = `Page ${cur.index + 1}`;
+            const percent = Math.round(cam.zoom * 100);
+            chip.querySelector('.qi-wb-title').textContent = `Page ${cur.index + 1}${percent === 100 ? '' : ` · ${percent}%`}`;
+            const zoomBtn = chip.querySelector('.qi-wb-zoom');
+            zoomBtn.textContent = '100%';
+            zoomBtn.hidden = percent === 100 && cam.scrollX === 0 && cam.scrollY === 0;
             chip.querySelectorAll('[data-style]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.style === cur.page.style ? 'true' : 'false'));
         }
         updateIndicator(cur);
@@ -295,13 +313,123 @@
         try { frame.contentWindow.postMessage({ type: 'QI_NAV_LOCK', next: lock.next, prev: lock.prev }, qiTargetOrigin()); } catch (_e) {}
     }
 
+    // --- Zoom and pan --------------------------------------------------------------------------
+
+    function excalApi() {
+        const excal = window.QuartoInkExcalidraw;
+        return excal && excal.getAPI ? excal.getAPI() : null;
+    }
+
+    function camera() {
+        const api = excalApi();
+        const a = api && api.getAppState();
+        if (!a || !current()) return { scrollX: 0, scrollY: 0, zoom: 1 };
+        return { scrollX: a.scrollX || 0, scrollY: a.scrollY || 0, zoom: (a.zoom && a.zoom.value) || 1 };
+    }
+
+    function setCamera(scrollX, scrollY, zoom) {
+        const api = excalApi();
+        if (!api || !current()) return;
+        try {
+            api.updateScene({ appState: { scrollX, scrollY, zoom: { value: zoom } }, commitToHistory: false });
+        } catch (_e) {}
+        render();
+    }
+
+    let pinch = null;
+    let pinchFrame = 0;
+    let holdUntilLift = false; // a finger stays down after a pinch: it must not draw or swipe
+
+    const isStylus = (t) => t.touchType === 'stylus';
+
+    function touchCenter(touches, rect) {
+        const a = touches[0];
+        const b = touches[1];
+        return {
+            x: (a.clientX + b.clientX) / 2 - rect.left,
+            y: (a.clientY + b.clientY) / 2 - rect.top,
+            d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1,
+        };
+    }
+
+    function onTouchStart(e) {
+        if (!current() || !e.touches || e.touches.length !== 2) return;
+        if (Array.prototype.some.call(e.touches, isStylus)) return;
+        const host = document.getElementById('excalidraw-host');
+        const stage = document.getElementById('editor-stage');
+        if (!host || !stage || !stage.contains(e.target)) return;
+        // Two fingers: a pinch, not the swipe to the next slide that the first finger started.
+        if (typeof onFingerSwipeTouchCancelCapture === 'function') onFingerSwipeTouchCancelCapture();
+        if (typeof setExcalidrawCanvasInputBlocked === 'function') setExcalidrawCanvasInputBlocked(true);
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const rect = host.getBoundingClientRect();
+        const c = touchCenter(e.touches, rect);
+        const cam = camera();
+        // The page point under the fingers stays under them.
+        pinch = { rect, d0: c.d, zoom0: cam.zoom, px: c.x / cam.zoom - cam.scrollX, py: c.y / cam.zoom - cam.scrollY };
+    }
+
+    function onTouchMove(e) {
+        if (!pinch) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (!e.touches || e.touches.length < 2) return;
+        const c = touchCenter(e.touches, pinch.rect);
+        const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, pinch.zoom0 * (c.d / pinch.d0)));
+        const next = { scrollX: c.x / zoom - pinch.px, scrollY: c.y / zoom - pinch.py, zoom };
+        cancelAnimationFrame(pinchFrame);
+        pinchFrame = requestAnimationFrame(() => setCamera(next.scrollX, next.scrollY, next.zoom));
+    }
+
+    function onTouchEnd(e) {
+        if (!pinch) return;
+        if (e.touches && e.touches.length >= 2) return;
+        pinch = null;
+        e.stopImmediatePropagation();
+        holdUntilLift = true;
+        onTouchEndRest(e);
+    }
+
+    function onTouchEndRest(e) {
+        if (!holdUntilLift || pinch || (e.touches && e.touches.length)) return;
+        holdUntilLift = false;
+        if (typeof setExcalidrawCanvasInputBlocked === 'function') setExcalidrawCanvasInputBlocked(false);
+    }
+
+    /**
+     * The scene area to put on the exported page: the slide box, grown to hold all of the
+     * page's ink (it may be drawn outside it, zoomed out), with the slide's proportions.
+     * Returns { box, factor } (factor: how much larger than the slide box).
+     */
+    function exportBox(slideKey, id, box) {
+        const excal = window.QuartoInkExcalidraw;
+        const scene = state.excalidrawScenes.get(keyOf(slideKey, id));
+        const serialized = typeof scene === 'string' ? scene : (scene ? JSON.stringify(scene) : null);
+        const bounds = excal && excal.getSceneBounds ? excal.getSceneBounds(serialized) : null;
+        if (!bounds || !(box.width > 0 && box.height > 0)) return { box, factor: 1 };
+        const pad = 16;
+        const minX = Math.min(box.x, bounds[0] - pad);
+        const minY = Math.min(box.y, bounds[1] - pad);
+        const maxX = Math.max(box.x + box.width, bounds[2] + pad);
+        const maxY = Math.max(box.y + box.height, bounds[3] + pad);
+        const factor = Math.max((maxX - minX) / box.width, (maxY - minY) / box.height, 1);
+        const width = box.width * factor;
+        const height = box.height * factor;
+        return {
+            box: { x: (minX + maxX) / 2 - width / 2, y: (minY + maxY) / 2 - height / 2, width, height },
+            factor,
+        };
+    }
+
     // --- Export -----------------------------------------------------------------------------
 
     /**
      * A blank page for the PDF/PNG export, like the rendered slide pages: `template` gives the
-     * page size and where the slide box sits ({ canvas, width, height, slideRect }).
+     * page size and where the slide box sits ({ canvas, width, height, slideRect }). With `fit`
+     * (from exportBox), the lines are drawn as they lie under the ink fitted onto the page.
      */
-    function renderPage(template, style, slideWidth) {
+    function renderPage(template, style, slideWidth, fit) {
         const canvas = document.createElement('canvas');
         canvas.width = template.canvas.width;
         canvas.height = template.canvas.height;
@@ -310,11 +438,20 @@
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         const rect = template.slideRect;
-        const step = SPACING * (rect.width / (slideWidth || rect.width)) * k;
+        const factor = (fit && fit.factor) || 1;
+        const step = SPACING * (rect.width / ((slideWidth || rect.width) * factor)) * k;
         if (style === 'grid' || style === 'lines') {
             ctx.fillStyle = 'rgba(29, 27, 23, 0.09)';
-            const ox = (rect.x * k) % step;
-            const oy = (rect.y * k) % step;
+            // Where the slide box's corner (the lines' origin on screen) lands on the page.
+            let originX = rect.x;
+            let originY = rect.y;
+            if (fit && fit.slideBox && fit.box) {
+                const s = rect.width / fit.box.width;
+                originX = rect.x + (fit.slideBox.x - fit.box.x) * s;
+                originY = rect.y + (fit.slideBox.y - fit.box.y) * s;
+            }
+            const ox = (((originX * k) % step) + step) % step;
+            const oy = (((originY * k) % step) + step) % step;
             const w = Math.max(1, Math.round(k));
             for (let y = oy; y < canvas.height; y += step) ctx.fillRect(0, Math.round(y), canvas.width, w);
             if (style === 'grid') for (let x = ox; x < canvas.width; x += step) ctx.fillRect(Math.round(x), 0, w, canvas.height);
@@ -326,11 +463,18 @@
         if (!state.whiteboards) state.whiteboards = new Map();
         const stage = document.getElementById('editor-stage');
         if (stage && 'ResizeObserver' in window) new ResizeObserver(() => { if (current()) render(); }).observe(stage);
+        window.addEventListener('touchstart', onTouchStart, { capture: true, passive: false });
+        window.addEventListener('touchmove', onTouchMove, { capture: true, passive: false });
+        window.addEventListener('touchend', onTouchEnd, { capture: true });
+        window.addEventListener('touchcancel', onTouchEnd, { capture: true });
+        window.addEventListener('touchend', onTouchEndRest);
+        window.addEventListener('touchcancel', onTouchEndRest);
+        window.addEventListener('quartoink:camera', () => { if (current()) render(); });
     }
 
     window.QuartoInkWhiteboard = {
         STYLES, pages, keyOf, current, currentKey, add, enter, leave, setStyle, remove,
-        handleNavigate, onSlideChange, render, renderPage,
+        handleNavigate, onSlideChange, render, renderPage, exportBox, camera, setCamera,
     };
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

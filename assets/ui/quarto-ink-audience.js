@@ -47,14 +47,28 @@
 
     function slideState() {
         const [h, v] = String(state.currentSlide || '0-0').split('-').map((n) => parseInt(n, 10) || 0);
-        const board = window.QuartoInkWhiteboard && window.QuartoInkWhiteboard.current();
+        const wb = window.QuartoInkWhiteboard;
+        const board = wb && wb.current();
+        let whiteboard = null;
+        if (board) {
+            // Where the zoomed and panned page's lines start, in slide widths from the slide's corner.
+            const cam = wb.camera();
+            const m = state.slidesBox || state.slideMetrics || { x: 0, y: 0, width: 1 };
+            const w = m.width || 1;
+            whiteboard = {
+                style: board.page.style,
+                zoom: cam.zoom,
+                dx: ((m.x + cam.scrollX) * cam.zoom - m.x) / w,
+                dy: ((m.y + cam.scrollY) * cam.zoom - m.y) / w,
+            };
+        }
         return {
             type: 'qi-audience-slide',
             h,
             v,
             f: typeof state.currentFragment === 'number' ? state.currentFragment : undefined,
             scope: state.currentTabScope || '',
-            whiteboard: board ? { style: board.page.style } : null,
+            whiteboard,
         };
     }
 
