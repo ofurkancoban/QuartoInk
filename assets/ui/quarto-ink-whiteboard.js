@@ -8,10 +8,11 @@
  *
  * Next/Prev walk through a slide's pages before moving on; the bridge keeps Reveal from
  * skipping them when the deck has the keyboard (QI_NAV_LOCK). The PDF export puts each
- * page after its slide, with all of its ink fitted onto the page.
+ * page after its slide, as it is on screen at 100%.
  *
- * Unlike slides, a page can be zoomed and panned: a two-finger pinch on a touch screen (done
+ * Unlike slides, a page can be zoomed in and panned: a two-finger pinch on a touch screen (done
  * here, as a one-finger touch is a swipe to the next slide) or the trackpad (Excalidraw's own).
+ * It never zooms out past 100% or pans past its edges, so all ink stays on the exported page.
  */
 (function () {
     'use strict';
@@ -20,7 +21,7 @@
     const STYLE_LABELS = { plain: 'Plain', grid: 'Grid', lines: 'Lines' };
     // Grid and line spacing, in slide px (scaled with the slide on screen and in the export).
     const SPACING = 40;
-    const MIN_ZOOM = 0.3;
+    const MIN_ZOOM = 1;
     const MAX_ZOOM = 5;
 
     let sheet = null;
@@ -269,7 +270,7 @@
         if (!cur) setChipOpen(false);
         if (cur && sheet) {
             // The whole slide area: the export maps the page's ink onto it.
-            const m = state.slidesBox || state.slideMetrics || { x: 0, y: 0, width: 0, height: 0 };
+            const m = pageBox();
             const base = (state.baseSlideSize && state.baseSlideSize.width) || m.width || 1;
             const scale = m.width / base || 1;
             // The lines follow the page's zoom and pan (scene -> screen: (p + scroll) * zoom).
@@ -327,9 +328,30 @@
         return { scrollX: a.scrollX || 0, scrollY: a.scrollY || 0, zoom: (a.zoom && a.zoom.value) || 1 };
     }
 
+    /** The slide box: the page, in screen px at 100% (and in scene px). */
+    function pageBox() {
+        return state.slidesBox || state.slideMetrics || { x: 0, y: 0, width: 0, height: 0 };
+    }
+
+    /**
+     * The nearest camera that keeps the page covering the slide box on screen: no zoom below
+     * 100%, no pan past an edge (scene -> screen: (p + scroll) * zoom).
+     */
+    function clampCamera(scrollX, scrollY, zoom) {
+        const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom || 1));
+        const m = pageBox();
+        const axis = (scroll, start, size) => {
+            const lo = (start + size) / z - start - size; // the far edge stays on screen's far edge
+            const hi = start / z - start; // the near edge stays on screen's near edge
+            return Math.min(hi, Math.max(lo, scroll));
+        };
+        return { scrollX: axis(scrollX, m.x, m.width), scrollY: axis(scrollY, m.y, m.height), zoom: z };
+    }
+
     function setCamera(scrollX, scrollY, zoom) {
         const api = excalApi();
         if (!api || !current()) return;
+        ({ scrollX, scrollY, zoom } = clampCamera(scrollX, scrollY, zoom));
         try {
             api.updateScene({ appState: { scrollX, scrollY, zoom: { value: zoom } }, commitToHistory: false });
         } catch (_e) {}
@@ -338,7 +360,7 @@
 
     let pinch = null;
     let pinchFrame = 0;
-    let holdUntilLift = false; // a finger stays down after a pinch: it must not draw or swipe
+    let holdUntilLift = false; // from a pinch's start until its last finger is up
 
     const isStylus = (t) => t.touchType === 'stylus';
 
@@ -353,14 +375,19 @@
     }
 
     function onTouchStart(e) {
+        // A lone finger means every earlier one is up, even if a touchend went missing.
+        if (e.touches && e.touches.length === 1 && !pinch && holdUntilLift) {
+            holdUntilLift = false;
+            pinchGesture('reset');
+        }
         if (!current() || !e.touches || e.touches.length !== 2) return;
         if (Array.prototype.some.call(e.touches, isStylus)) return;
         const host = document.getElementById('excalidraw-host');
         const stage = document.getElementById('editor-stage');
         if (!host || !stage || !stage.contains(e.target)) return;
         // Two fingers: a pinch, not the swipe to the next slide that the first finger started.
-        if (typeof onFingerSwipeTouchCancelCapture === 'function') onFingerSwipeTouchCancelCapture();
-        if (typeof setExcalidrawCanvasInputBlocked === 'function') setExcalidrawCanvasInputBlocked(true);
+        pinchGesture('start');
+        holdUntilLift = true;
         e.preventDefault();
         e.stopImmediatePropagation();
         const rect = host.getBoundingClientRect();
@@ -377,6 +404,7 @@
         if (!e.touches || e.touches.length < 2) return;
         const c = touchCenter(e.touches, pinch.rect);
         const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, pinch.zoom0 * (c.d / pinch.d0)));
+        // At 100% the fingers cannot pull the page along: it snaps back in setCamera.
         const next = { scrollX: c.x / zoom - pinch.px, scrollY: c.y / zoom - pinch.py, zoom };
         cancelAnimationFrame(pinchFrame);
         pinchFrame = requestAnimationFrame(() => setCamera(next.scrollX, next.scrollY, next.zoom));
@@ -387,19 +415,35 @@
         if (e.touches && e.touches.length >= 2) return;
         pinch = null;
         e.stopImmediatePropagation();
-        holdUntilLift = true;
         onTouchEndRest(e);
     }
 
     function onTouchEndRest(e) {
         if (!holdUntilLift || pinch || (e.touches && e.touches.length)) return;
         holdUntilLift = false;
-        if (typeof setExcalidrawCanvasInputBlocked === 'function') setExcalidrawCanvasInputBlocked(false);
+        // The last finger is up: its lift (and a late pointerup) is not a swipe.
+        pinchGesture('end');
+    }
+
+    /** Swipe and canvas handling during a pinch lives with the swipe code in index.html. */
+    function pinchGesture(phase) {
+        if (typeof window.qiPinchGesture === 'function') window.qiPinchGesture(phase);
+    }
+
+    /** Pull a camera set elsewhere (trackpad, hand tool, a resize) back onto the page. */
+    function keepOnPage() {
+        if (!current()) return;
+        const cam = camera();
+        const c = clampCamera(cam.scrollX, cam.scrollY, cam.zoom);
+        const off = Math.abs(c.scrollX - cam.scrollX) > 0.01 || Math.abs(c.scrollY - cam.scrollY) > 0.01 || Math.abs(c.zoom - cam.zoom) > 0.0001;
+        if (off) setCamera(c.scrollX, c.scrollY, c.zoom);
+        else render();
     }
 
     /**
      * The scene area to put on the exported page: the slide box, grown to hold all of the
-     * page's ink (it may be drawn outside it, zoomed out), with the slide's proportions.
+     * page's ink with the slide's proportions. Ink stays on the page now, so this is the slide
+     * box itself, except for pages drawn zoomed out before (or ink drawn in the margins).
      * Returns { box, factor } (factor: how much larger than the slide box).
      */
     function exportBox(slideKey, id, box) {
@@ -462,14 +506,14 @@
     function init() {
         if (!state.whiteboards) state.whiteboards = new Map();
         const stage = document.getElementById('editor-stage');
-        if (stage && 'ResizeObserver' in window) new ResizeObserver(() => { if (current()) render(); }).observe(stage);
+        if (stage && 'ResizeObserver' in window) new ResizeObserver(keepOnPage).observe(stage);
         window.addEventListener('touchstart', onTouchStart, { capture: true, passive: false });
         window.addEventListener('touchmove', onTouchMove, { capture: true, passive: false });
         window.addEventListener('touchend', onTouchEnd, { capture: true });
         window.addEventListener('touchcancel', onTouchEnd, { capture: true });
         window.addEventListener('touchend', onTouchEndRest);
         window.addEventListener('touchcancel', onTouchEndRest);
-        window.addEventListener('quartoink:camera', () => { if (current()) render(); });
+        window.addEventListener('quartoink:camera', keepOnPage);
     }
 
     window.QuartoInkWhiteboard = {

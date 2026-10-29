@@ -91,6 +91,25 @@ const SEMANTIC_PATCHES = [
       }
       return { content, applied: false };
     }
+  },
+
+  // 6. No phone layout: Quarto Ink replaces Excalidraw's toolbar with its own and lays out the
+  //    desktop property panel, which the phone layout (picked when the canvas is narrower than
+  //    730 px, e.g. a portrait iPad or a docked side toolbar) does not have.
+  {
+    name: 'Desktop Layout Only',
+    replace: (content) => {
+      if (/"isMobileBreakpoint",\s*\([\w$]+,\s*[\w$]+\)\s*=>\s*(?:\{\s*return\s+)?false/.test(content)) {
+        return { content, applied: false };
+      }
+      // Only a body without parentheses or braces inside: anything else is left alone (reported
+      // as "no match") rather than cut at the wrong ')' into a broken bundle.
+      const regex = /("isMobileBreakpoint",\s*\(([\w$]+),\s*([\w$]+)\)\s*=>\s*)(\{\s*return\s+[^;{}()]+;\s*\}|[^(){};,]+)\)/g;
+      if (regex.test(content)) {
+        return { content: content.replace(regex, '$1false)'), applied: true };
+      }
+      return { content, applied: false };
+    }
   }
 ];
 

@@ -352,4 +352,39 @@ describe('Interface details', () => {
             await context.close();
         }
     });
+
+    it('opens the property panel inside the workspace with the toolbar on any side', async () => {
+        for (const viewport of [{ width: 1194, height: 834 }, { width: 834, height: 1194 }]) {
+            const { page, context, errors } = await openApp(browser, server, { viewport });
+            try {
+                await openDecks(page, [['a.html', deckA]]);
+                await waitForDeck(page, 'a.html');
+                for (const pos of ['left', 'right', 'bottom', 'top']) {
+                    await page.evaluate((p) => setDockPos(p), pos);
+                    await page.waitForTimeout(400);
+                    if (await page.evaluate(() => state.excalToolPanelOpen)) await page.click('#btn-pen');
+                    await page.click('#btn-pen');
+                    if (!(await page.evaluate(() => state.excalToolPanelOpen))) await page.click('#btn-pen');
+                    await page.waitForFunction(() => document.getElementById('app').dataset.quartoExcalToolpanelReady === '1');
+                    await page.waitForTimeout(500);
+                    const at = await page.evaluate(() => {
+                        const island = document.querySelector('#excalidraw-host .selected-shape-actions .Island').getBoundingClientRect();
+                        const ws = document.getElementById('workspace').getBoundingClientRect();
+                        const bar = document.getElementById('goodnotes-top-bar').getBoundingClientRect();
+                        const hit = document.elementFromPoint(island.left + 30, island.top + 12);
+                        const overlap = !(island.right <= bar.left || island.left >= bar.right || island.bottom <= bar.top || island.top >= bar.bottom);
+                        return { island: [island.left, island.top, island.right, island.bottom], ws: [ws.left, ws.top, ws.right, ws.bottom], overlap, onTop: !!(hit && hit.closest('.selected-shape-actions')) };
+                    });
+                    const where = `${pos} dock at ${viewport.width}x${viewport.height}: ${JSON.stringify(at)}`;
+                    assert.ok(at.island[0] >= at.ws[0] - 1 && at.island[2] <= at.ws[2] + 1, `inside the workspace sideways, ${where}`);
+                    assert.ok(at.island[1] >= at.ws[1] && at.island[3] <= at.ws[3], `inside the workspace up and down, ${where}`);
+                    assert.ok(!at.overlap, `clear of the toolbar, ${where}`);
+                    assert.ok(at.onTop, `not covered, ${where}`);
+                }
+                assert.deepEqual(errors, []);
+            } finally {
+                await context.close();
+            }
+        }
+    });
 });

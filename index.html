@@ -1611,12 +1611,13 @@ h1, h2, h3 {
 #excalidraw-host .excalidraw .selected-shape-actions {
     display: flex !important;
     position: fixed !important;
-    /* Below the toolbar: --qi-tool-panel-top is kept current from JS (syncExcalToolPanelTop).
+    /* At the top of the workspace, centred on it: --qi-tool-panel-top, -left and -max-width are
+       kept current from JS (syncExcalToolPanelTop).
        It lives on #app, not on this element, because Excalidraw re-creates the panel (e.g. when it
        detects a pen) and inline styles set on it would be lost. */
-    top: var(--qi-tool-panel-top, 80px) !important;
+    top: max(var(--qi-tool-panel-top, 80px), calc(env(safe-area-inset-top, 0px) + 6px)) !important;
     bottom: auto !important;
-    left: 50% !important;
+    left: var(--qi-tool-panel-left, 50%) !important;
     flex-direction: row !important;
     /* Hang the panel from the top: centred, a taller (wrapped) panel grew upward under the toolbar. */
     align-items: flex-start !important;
@@ -1628,7 +1629,7 @@ h1, h2, h3 {
     z-index: 20000 !important;
     width: fit-content !important; 
     min-width: 0 !important;
-    max-width: calc(100vw - 32px) !important;
+    max-width: var(--qi-tool-panel-max-width, calc(100vw - 32px)) !important;
     height: auto !important;
     pointer-events: none !important;
     border: none !important;
@@ -1685,6 +1686,7 @@ h1, h2, h3 {
     justify-content: flex-start !important;
     gap: 12px !important;
     width: max-content !important;
+    max-width: var(--qi-tool-panel-max-width, calc(100vw - 32px)) !important;
     min-width: 0 !important;
     flex-wrap: wrap !important;
     height: auto !important;
@@ -1692,8 +1694,14 @@ h1, h2, h3 {
     box-sizing: border-box !important;
 }
 
-#excalidraw-host .excalidraw .selected-shape-actions .panelColumn {
-    display: contents !important; /* Let Island grid place groups horizontally */
+/* The open panel may reach over the slide arrows beside the stage (z-index 25): lift the stage,
+   which holds it, above them. The stage itself does not cover the arrows' columns. */
+#app[data-quarto-excal-toolpanel="1"] .editor-stage { z-index: 26; }
+/* A workspace narrower than the panel (portrait, a side toolbar): its groups wrap onto more rows. */
+#app[data-quarto-excal-toolpanel="1"] #excalidraw-host .excalidraw .selected-shape-actions .panelColumn {
+    flex-wrap: wrap !important;
+    row-gap: 10px !important;
+    max-width: 100% !important;
 }
 
 #app[data-quarto-excal-toolpanel="1"] #excalidraw-host .excalidraw .App-menu_top .Island,
@@ -3778,23 +3786,36 @@ let excalToolPanelLayoutRaf = 0;
 let excalToolPanelLayoutInterval = 0;
 
 /**
- * Puts the property panel below the toolbar (whose height changes when it wraps onto two rows)
- * and inside the workspace: on iPad, WebKit clips the fixed panel to the workspace (its
- * rounded, overflow-hidden box), so a panel starting above it lost its top part.
+ * Puts the property panel at the top of the workspace, centred on it and no wider: on iPad,
+ * WebKit clips the fixed panel to the workspace (its rounded, overflow-hidden box), so any part
+ * outside it was lost. The workspace is below a top toolbar (whose height changes when it wraps
+ * onto two rows) and beside a left or right one, so this holds for every dock position.
  */
+let lastToolPanelPlace = '';
 function syncExcalToolPanelTop() {
     const appEl = _$('#app');
-    const bar = _$('#goodnotes-top-bar');
     const workspace = _$('#workspace');
-    if (!appEl) return;
-    const barBottom = bar ? bar.getBoundingClientRect().bottom : 84;
-    const workspaceTop = workspace ? workspace.getBoundingClientRect().top : 0;
-    appEl.style.setProperty('--qi-tool-panel-top', `${Math.max(60, Math.round(Math.max(barBottom, workspaceTop) + 6))}px`);
+    if (!appEl || !workspace) return;
+    const ws = workspace.getBoundingClientRect();
+    if (!(ws.width > 0)) return;
+    const top = Math.round(ws.top + 6);
+    const left = Math.round(ws.left + ws.width / 2);
+    // Never wider than the workspace, which would cut it off again.
+    const maxWidth = Math.max(0, Math.round(ws.width - 16));
+    const place = `${top}|${left}|${maxWidth}`;
+    if (place === lastToolPanelPlace) return; // called often while the panel is open
+    lastToolPanelPlace = place;
+    appEl.style.setProperty('--qi-tool-panel-top', `${top}px`);
+    appEl.style.setProperty('--qi-tool-panel-left', `${left}px`);
+    appEl.style.setProperty('--qi-tool-panel-max-width', `${maxWidth}px`);
 }
 if (typeof ResizeObserver === 'function') {
     const watchToolbar = () => {
         const bar = _$('#goodnotes-top-bar');
-        if (bar) new ResizeObserver(syncExcalToolPanelTop).observe(bar);
+        const workspace = _$('#workspace');
+        const observer = new ResizeObserver(syncExcalToolPanelTop);
+        if (bar) observer.observe(bar);
+        if (workspace) observer.observe(workspace);
     };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watchToolbar);
     else watchToolbar();
@@ -3820,12 +3841,12 @@ function forceHorizontalExcalidrawToolPanelLayout() {
         island.style.setProperty('flex-wrap', 'wrap', 'important');
         island.style.setProperty('gap', '12px', 'important');
         island.style.setProperty('width', 'max-content', 'important');
-        island.style.setProperty('max-width', 'calc(100vw - 32px)', 'important');
+        island.style.setProperty('max-width', 'var(--qi-tool-panel-max-width, calc(100vw - 32px))', 'important');
         island.style.setProperty('overflow-x', 'visible', 'important');
 
         const wrappers = island.querySelectorAll(':scope > .Stack, :scope > [class*="Stack"], :scope > .panelColumn, :scope > fieldset, :scope > div');
         wrappers.forEach((w) => {
-            /* Keep CSS `display: contents` on .panelColumn so property columns stay one horizontal row on .Island. */
+            /* .panelColumn is laid out by the CSS rules above (a wrapping row), not here. */
             if (w.classList && w.classList.contains('panelColumn')) return;
             if (w.dataset && w.dataset.qiHidden === '1') return;
             w.style.setProperty('display', 'flex', 'important');
@@ -4716,7 +4737,7 @@ function loadScriptOnce(src) {
 
 async function ensureExcalidrawRuntime() {
     window.EXCALIDRAW_ASSET_PATH = new URL('excalidraw-widget/dist/', window.location.href).href;
-    const src = 'excalidraw-widget/dist/quarto-ink-excalidraw.js?v=ba0cb4c1ec';
+    const src = 'excalidraw-widget/dist/quarto-ink-excalidraw.js?v=94826f43d8';
     const vm = src.match(/[?&]v=([^&]+)/);
     const wantV = vm ? vm[1] : '';
     const ok =
@@ -7214,7 +7235,41 @@ function applySlideChangeMessage(data) {
 }
 
 
+/** True while two fingers pinch a blank page, and briefly after: their lift is not a swipe. */
+function isPinchGestureActive() {
+    return !!state._qiPinching || performance.now() < (state._qiPinchUntil || 0);
+}
+
+/**
+ * A two-finger pinch on a blank page (assets/ui/quarto-ink-whiteboard.js), so the finger swipe
+ * to the next slide stays out of it:
+ * 'start' - drop the swipe the first finger began (as a touch or, on iPad Safari, as a pointer)
+ *           and hold the canvas until the fingers are up;
+ * 'end'   - the last finger is up: free the canvas, and ignore swipes ending in the next moment;
+ * 'reset' - a lone new finger after a pinch whose end went missing: free everything at once.
+ */
+function qiPinchGesture(phase) {
+    if (phase === 'start') {
+        onFingerSwipeTouchCancelCapture();
+        if (state._fingerSwipe) {
+            try { canvas.releasePointerCapture(state._fingerSwipe.pid); } catch (_e) {}
+            state._fingerSwipe = null;
+        }
+        clearFingerCanvasUnblockFailsafe();
+        state._qiPinching = true;
+        setExcalidrawCanvasInputBlocked(true);
+        return;
+    }
+    if (!state._qiPinching) return;
+    state._qiPinching = false;
+    state._qiPinchUntil = phase === 'end' ? performance.now() + 500 : 0;
+    state._fingerSwipe = null;
+    setExcalidrawCanvasInputBlocked(false);
+}
+window.qiPinchGesture = qiPinchGesture;
+
 function tryNavigateFromSwipe(dx, dy, dt) {
+    if (isPinchGestureActive()) return;
     const minD = 40;
     const maxT = 1200;
     const ratio = 1.15;
@@ -7284,6 +7339,8 @@ function onFingerSwipePointerDownCapture(e) {
     if (!isFingerSwipeGestureTarget(e.target)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
+    // A finger joining a pinch does not start a swipe of its own.
+    if (state._qiPinching) return;
     state._lastPointerSwipeStartTs = performance.now();
     state._fingerSwipeTouch = null;
     clearFingerCanvasUnblockFailsafe();
@@ -7413,6 +7470,12 @@ window.setDockPos = function(pos) {
     localStorage.setItem('gn_dock_pos', pos);
     // Refresh popover alignment logic if needed
     syncPopoverPos(pos);
+    // The workspace moves to the other side: after the layout has settled (the resize observer
+    // misses a move that keeps its size).
+    if (typeof syncExcalToolPanelTop === 'function') {
+        requestAnimationFrame(syncExcalToolPanelTop);
+        setTimeout(syncExcalToolPanelTop, 400);
+    }
 };
 
 function syncPopoverPos(pos) {
