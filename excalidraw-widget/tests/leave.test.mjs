@@ -97,7 +97,7 @@ describe('Save before leaving', () => {
         }
     });
 
-    it('saves both files from the dialog, the PDF with a tap of its own when needed', async () => {
+    it('saves both files from the dialog, the HTML with a tap of its own', async () => {
         const { page, context, errors } = await openApp(browser, server);
         try {
             const got = [];
@@ -112,12 +112,8 @@ describe('Save before leaving', () => {
             await page.evaluate(() => document.querySelector('.qi-doc-tab.is-active .qi-doc-tab-close').click());
             await page.waitForTimeout(300);
             assert.equal(await openCount(page), 1, 'the deck stays open while its PDF is made');
-            // The PDF is ready long after the tap: it is offered again (as on iPad), or saved at once.
-            const offer = page.locator('.qi-dialog-card button', { hasText: 'Save PDF' });
-            await Promise.race([
-                offer.waitFor({ timeout: 60000 }).then(() => offer.click()),
-                page.waitForFunction(() => window.QuartoInkDocs.list().length === 0, null, { timeout: 60000 }),
-            ]);
+            // The HTML comes after the PDF, with a tap of its own.
+            await page.locator('.qi-dialog-card button', { hasText: 'Save HTML' }).click({ timeout: 60000 });
             await page.waitForFunction(() => window.QuartoInkDocs.list().length === 0, null, { timeout: 60000 });
             await page.waitForTimeout(500);
             assert.deepEqual(got.sort(), ['a-annotated.pdf', 'a-with-ink.html']);

@@ -657,11 +657,7 @@
         }
     }
 
-    /**
-     * `deliver(blob, fileName)`, when given, hands the file over instead of downloading it, and
-     * resolves true when it was saved (the save dialog offers it after an HTML download).
-     */
-    async function exportPdf({ annotations = true, deliver = null } = {}) {
+    async function exportPdf({ annotations = true } = {}) {
         if (isBusy()) return;
         const slides = (state.slides || []).slice();
         if (state.htmlContent && !slides.length) {
@@ -765,15 +761,7 @@
         if (current.cancelled) {
             setStatus('PDF export cancelled');
         } else if (pdf) {
-            const fileName = `${baseFileName()}${annotations ? '-annotated' : ''}.pdf`;
-            if (deliver) {
-                if (!(await deliver(pdf, fileName))) {
-                    setStatus('PDF not saved');
-                    return false;
-                }
-            } else {
-                download(pdf, fileName);
-            }
+            download(pdf, `${baseFileName()}${annotations ? '-annotated' : ''}.pdf`);
             setStatus(`Exported PDF: ${pages.length} page${pages.length === 1 ? '' : 's'}`);
             if (annotations) window.dispatchEvent(new CustomEvent('quartoink:ink-saved'));
             return true;
@@ -843,7 +831,7 @@
         }
     }
 
-    window.QuartoInkExport = { exportPdf, exportPng, renderCurrentSlide, buildPdf, download };
+    window.QuartoInkExport = { exportPdf, exportPng, renderCurrentSlide, buildPdf };
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initMenu);

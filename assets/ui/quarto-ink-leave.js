@@ -164,40 +164,37 @@
     }
 
     /**
-     * The PDF after the HTML ("Both"): Safari on iPad saves one file per tap, and the PDF is
-     * ready long after the tap that saved the HTML, so it waits for a tap of its own there.
+     * The HTML after the PDF ("Both"), with a tap of its own. Safari (also on iPad) drops a
+     * download that another one follows at once, and holds the deck while it asks about one.
      */
-    async function deliverAfterHtml(blob, fileName) {
-        const tapNeeded = (navigator.userActivation && !navigator.userActivation.isActive)
-            || (typeof isIPadLikeTouchDevice === 'function' && isIPadLikeTouchDevice());
-        if (!tapNeeded) {
-            window.QuartoInkExport.download(blob, fileName);
-            return true;
-        }
+    async function saveHtmlAfterPdf(pdfSaved) {
         dialogOpen = true;
         try {
-            const ok = await qiConfirm('Your PDF is ready', 'The HTML file is saved. Save the PDF as well?', { confirmText: 'Save PDF', cancelText: 'Skip' });
-            if (ok) window.QuartoInkExport.download(blob, fileName);
-            return ok;
+            const ok = await qiConfirm(
+                pdfSaved ? 'Your PDF is saved' : 'The PDF was not saved',
+                'Save the deck with its ink as an HTML file as well?',
+                { confirmText: 'Save HTML', cancelText: 'Skip' },
+            );
+            if (!ok) return false;
         } finally {
             dialogOpen = false;
         }
+        window.QuartoInkShare.download();
+        return true;
     }
 
-    /** Save the visible deck as the user chose. Resolves true when everything chosen was saved. */
+    /** Save the visible deck as the user chose. Resolves true when the ink was saved. */
     async function save(choice) {
-        if (choice === 'html' || choice === 'both') {
-            if (!window.QuartoInkShare) return false;
+        if (!window.QuartoInkShare || !window.QuartoInkExport) return false;
+        if (choice === 'html') {
             window.QuartoInkShare.download();
+            return true;
         }
-        if (choice === 'pdf' || choice === 'both') {
-            if (!window.QuartoInkExport) return false;
-            const deliver = choice === 'both' ? deliverAfterHtml : null;
-            const ok = await window.QuartoInkExport.exportPdf({ annotations: true, deliver });
-            // With "Both", the HTML file already holds all of the ink.
-            if (!ok && choice !== 'both') return false;
-        }
-        return true;
+        const pdfSaved = !!(await window.QuartoInkExport.exportPdf({ annotations: true }));
+        if (choice === 'pdf') return pdfSaved;
+        // "Both": either file holds all of the ink.
+        const htmlSaved = await saveHtmlAfterPdf(pdfSaved);
+        return pdfSaved || htmlSaved;
     }
 
     function waitFor(test, timeout) {
