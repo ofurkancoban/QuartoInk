@@ -65,6 +65,32 @@ describe('Quarto Ink app', () => {
         });
     });
 
+    it('still draws after Safari loses a MessageChannel message', async () => {
+        await withDeck(async ({ page }) => {
+            await page.waitForTimeout(800);
+            // iPad Safari can drop a message on a MessageChannel (download prompt, file picker).
+            // React's scheduler must not depend on one, or Excalidraw never renders again.
+            await page.evaluate(() => {
+                const post = MessagePort.prototype.postMessage;
+                let drop = 1;
+                MessagePort.prototype.postMessage = function () {
+                    if (drop > 0) {
+                        drop -= 1;
+                        return undefined;
+                    }
+                    return post.apply(this, arguments);
+                };
+                window.QuartoInkExcalidraw.unmount();
+                state.lastMountedSlideKey = null;
+                syncAnnotationEngineMount();
+            });
+            await page.waitForFunction(() => !!window.QuartoInkExcalidraw.getAPI(), null, { timeout: 5000 });
+            await page.waitForTimeout(600);
+            await drawStroke(page, 0.5);
+            assert.equal((await appInfo(page)).count, 1);
+        });
+    });
+
     it('records the whole first stroke after opening a deck', async () => {
         // Regression: with the deck iframe focused, Excalidraw finalized the first stroke on pointerdown.
         await withDeck(async ({ page }) => {
