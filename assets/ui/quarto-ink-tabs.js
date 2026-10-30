@@ -200,11 +200,14 @@
     // --- State --------------------------------------------------------------
 
     /** Persist the active deck and remember where the user was. */
-    function rememberActive() {
+    /** `saveInk: false` when the stored ink was just replaced (a file brought its own). */
+    function rememberActive({ saveInk = true } = {}) {
         const doc = findDoc(activeId);
         if (!doc || typeof state === 'undefined') return;
-        try { flushExcalidrawSceneToStorageForCurrentKey(); } catch (_e) {}
-        try { saveToLocalStorage(); } catch (_e) {}
+        if (saveInk) {
+            try { flushExcalidrawSceneToStorageForCurrentKey(); } catch (_e) {}
+            try { saveToLocalStorage(); } catch (_e) {}
+        }
         const m = /^(\d+)-(\d+)$/.exec(state.currentSlide || '');
         doc.slide = m ? { h: +m[1], v: +m[2] } : null;
         const idx = doc.slide && Array.isArray(state.slides)
@@ -466,6 +469,9 @@
     /** Open one or more files: every valid deck gets a tab, the first new one is shown. */
     async function openFiles(files) {
         let first = null;
+        let imported = false; // a file's ink replaced what was stored for it
+        // Store the visible deck's ink first: a file may bring ink for that same deck.
+        rememberActive();
         for (const file of files) {
             let content;
             try {
@@ -482,7 +488,7 @@
             const shared = window.QuartoInkShare && window.QuartoInkShare.extract(content);
             if (shared) {
                 content = shared.html;
-                try { await window.QuartoInkShare.importInk(file.name, content, shared.annotations); } catch (_e) {}
+                try { if (await window.QuartoInkShare.importInk(file.name, content, shared.annotations)) imported = true; } catch (_e) {}
             }
             if (file.size > 100 * 1024 * 1024 && window.log) {
                 window.log(`Large file (over 100 MB): ${file.name} stays in memory while its tab is open.`, 'warn');
@@ -506,7 +512,7 @@
         }
         if (first.id === activeId) {
             // Re-opened the visible deck: reload it with the fresh content.
-            rememberActive();
+            rememberActive({ saveInk: !imported });
             render();
             loadFresh(first, null);
         } else {

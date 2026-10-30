@@ -73,6 +73,22 @@ describe('Deck with ink', () => {
             await reopened;
             await page.waitForTimeout(800);
             assert.equal((await appInfo(page)).elements['0-0'].length, 2, 'kept the local ink');
+            await drawStroke(page, 0.8);
+            assert.equal((await appInfo(page)).elements['0-0'].length, 3, 'still draws after the question');
+
+            // Opened again, taking the file's ink: it replaces the ink here, and the pen still draws.
+            const replaced = page.evaluate((html) => window.QuartoInkDocs.openFiles([new File([html], 'talk-with-ink.html', { type: 'text/html' })]), shared);
+            await page.locator('.qi-dialog-card button', { hasText: 'Use the file' }).click();
+            await replaced;
+            await waitForDeck(page, 'talk-with-ink.html');
+            await page.waitForFunction(() => {
+                const raw = state.excalidrawScenes.get('0-0');
+                const scene = typeof raw === 'string' ? JSON.parse(raw) : raw;
+                return !!scene && (scene.elements || []).filter((e) => !e.isDeleted).length === 1;
+            }, null, { timeout: 10000 });
+            await page.waitForTimeout(800);
+            await drawStroke(page, 0.3);
+            assert.equal((await appInfo(page)).elements['0-0'].length, 2, 'the file\u2019s stroke and the new one');
             assert.deepEqual(viewer.errors, []);
         } finally {
             await viewer.context.close();

@@ -162,6 +162,27 @@
         });
     }
 
+    /**
+     * The PDF after the HTML ("Both"): Safari on iPad saves one file per tap, and the PDF is
+     * ready long after the tap that saved the HTML, so it waits for a tap of its own there.
+     */
+    async function deliverAfterHtml(blob, fileName) {
+        const tapNeeded = (navigator.userActivation && !navigator.userActivation.isActive)
+            || (typeof isIPadLikeTouchDevice === 'function' && isIPadLikeTouchDevice());
+        if (!tapNeeded) {
+            window.QuartoInkExport.download(blob, fileName);
+            return true;
+        }
+        dialogOpen = true;
+        try {
+            const ok = await qiConfirm('Your PDF is ready', 'The HTML file is saved. Save the PDF as well?', { confirmText: 'Save PDF', cancelText: 'Skip' });
+            if (ok) window.QuartoInkExport.download(blob, fileName);
+            return ok;
+        } finally {
+            dialogOpen = false;
+        }
+    }
+
     /** Save the visible deck as the user chose. Resolves true when everything chosen was saved. */
     async function save(choice) {
         if (choice === 'html' || choice === 'both') {
@@ -170,8 +191,10 @@
         }
         if (choice === 'pdf' || choice === 'both') {
             if (!window.QuartoInkExport) return false;
-            const ok = await window.QuartoInkExport.exportPdf({ annotations: true });
-            if (!ok) return false;
+            const deliver = choice === 'both' ? deliverAfterHtml : null;
+            const ok = await window.QuartoInkExport.exportPdf({ annotations: true, deliver });
+            // With "Both", the HTML file already holds all of the ink.
+            if (!ok && choice !== 'both') return false;
         }
         return true;
     }
