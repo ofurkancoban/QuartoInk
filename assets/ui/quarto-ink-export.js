@@ -67,6 +67,22 @@
         setTimeout(() => URL.revokeObjectURL(a.href), 4000);
     }
 
+    /**
+     * Give a canvas's pixels back at once. Safari on iPad allows a page little canvas memory
+     * and frees it late: a whole deck of slide-sized canvases left to the garbage collector
+     * used it up, and Excalidraw then could not create its own canvas until a reload.
+     */
+    function releaseCanvas(canvas) {
+        if (!canvas) return;
+        canvas.width = 0;
+        canvas.height = 0;
+    }
+
+    /** A rendered page's size and slide box, without its pixels (for its blank pages). */
+    function pageTemplate(page) {
+        return { canvas: { width: page.canvas.width, height: page.canvas.height }, width: page.width, height: page.height, slideRect: page.slideRect };
+    }
+
     function canvasToBlob(canvas, type, quality) {
         return new Promise((resolve, reject) => {
             canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('The slide image could not be encoded.'))), type, quality);
@@ -645,6 +661,7 @@
             setStatus('Exporting the current slide as PNG...');
             const canvas = await renderCurrentSlide({ annotations: true });
             const blob = await canvasToBlob(canvas, 'image/png');
+            releaseCanvas(canvas);
             const index = (state.slides || []).findIndex((s) => slideKeyOf(s) === state.currentSlide);
             download(blob, `${baseFileName()}-slide-${index >= 0 ? index + 1 : state.currentSlide}.png`);
             setStatus('Exported the current slide as PNG');
@@ -708,15 +725,19 @@
                     if (current.cancelled) break;
                     if (scope !== (await agentCall('activeTabScope')) && !(await agentCall('showTabScope', scope))) continue;
                     let page = await renderSlide();
-                    template = template || page;
+                    template = template || pageTemplate(page);
                     if (annotations) await drawInk(page, slideKey, getCurrentAnnotationKey(slideKey, scope), layout.box);
                     if (note) {
-                        page = appendNotes(page, note);
+                        const withNote = appendNotes(page, note);
+                        if (withNote !== page) releaseCanvas(page.canvas);
+                        page = withNote;
                         note = '';
                     }
                     // Encoded while the next slide renders; awaited before the PDF is written.
-                    const jpeg = canvasToBlob(page.canvas, 'image/jpeg', JPEG_QUALITY)
-                        .then(async (blob) => new Uint8Array(await blob.arrayBuffer()));
+                    const done = page.canvas;
+                    const jpeg = canvasToBlob(done, 'image/jpeg', JPEG_QUALITY)
+                        .then(async (blob) => new Uint8Array(await blob.arrayBuffer()))
+                        .finally(() => releaseCanvas(done));
                     jpeg.catch(() => {}); // reported when awaited; ignored after a cancel
                     pages.push({ jpeg, pixelWidth: page.canvas.width, pixelHeight: page.canvas.height, width: page.width, height: page.height, words: page.words });
                 }
@@ -728,8 +749,10 @@
                     const fit = window.QuartoInkWhiteboard.exportBox(slideKey, board.id, layout.box);
                     const page = window.QuartoInkWhiteboard.renderPage(template, board.style, layout.size.width, { ...fit, slideBox: layout.box });
                     await drawInk(page, slideKey, window.QuartoInkWhiteboard.keyOf(slideKey, board.id), fit.box);
-                    const jpeg = canvasToBlob(page.canvas, 'image/jpeg', JPEG_QUALITY)
-                        .then(async (blob) => new Uint8Array(await blob.arrayBuffer()));
+                    const done = page.canvas;
+                    const jpeg = canvasToBlob(done, 'image/jpeg', JPEG_QUALITY)
+                        .then(async (blob) => new Uint8Array(await blob.arrayBuffer()))
+                        .finally(() => releaseCanvas(done));
                     jpeg.catch(() => {});
                     pages.push({ jpeg, pixelWidth: page.canvas.width, pixelHeight: page.canvas.height, width: page.width, height: page.height, words: [] });
                 }

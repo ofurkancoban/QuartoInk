@@ -81,6 +81,17 @@
         return `${name}: ${value === undefined ? '-' : (typeof value === 'object' && value !== null ? 'set' : String(value))}`;
     }
 
+    /** Whether the page can still get a 2D canvas (Safari refuses once its canvas memory is used up). */
+    function canvasWorks() {
+        const c = document.createElement('canvas');
+        c.width = 512;
+        c.height = 512;
+        const ok = !!c.getContext('2d');
+        c.width = 0;
+        c.height = 0;
+        return ok;
+    }
+
     function stateLines() {
         if (typeof state === 'undefined') return ['no state yet'];
         const host = document.getElementById('excalidraw-host');
@@ -97,7 +108,7 @@
             `${flag('blocked', state._fingerGestureBlocksExcalCanvas)}  ${flag('swipe', state._fingerSwipe)}  ${flag('touchSwipe', state._fingerSwipeTouch)}  ${flag('pinching', state._qiPinching)}  ${flag('dragging', state.isDragging)}`,
             `host: ${host ? `${getComputedStyle(host).display} pe=${getComputedStyle(host).pointerEvents} ${Math.round(box.width)}x${Math.round(box.height)}` : 'none'}  canvases: ${canvases.map((c) => c.style.pointerEvents || 'auto').join(',') || 'none'}`,
             `excalidraw: ${api ? `${app ? app.activeTool.type : '?'} view=${app && app.viewModeEnabled} pen=${app && app.penMode}/${app && app.penDetected} elements=${api.getSceneElements().length}` : 'not mounted'}`,
-            `middle: ${describe(mid)}  focus: ${describe(document.activeElement)}`,
+            `middle: ${describe(mid)}  focus: ${describe(document.activeElement)}  new canvas: ${canvasWorks() ? 'ok' : 'FAILED (canvas memory full)'}`,
             `overlays: ${Array.from(document.querySelectorAll('.modal-overlay')).filter((o) => getComputedStyle(o).display !== 'none').map(describe).join(', ') || 'none'}`,
         ];
     }

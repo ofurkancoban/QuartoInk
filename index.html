@@ -4956,9 +4956,10 @@ function syncAnnotationEngineMount() {
 }
 
 /**
- * Excalidraw should report its API within moments of a mount. On iPad Safari, after a deck
- * was closed (seen after saving it as PDF and HTML), a mount could stay empty until a reload:
- * no canvas, so the pen drew nothing. Mount again, a couple of times, when that happens.
+ * Excalidraw should report its API within moments of a mount. On iPad Safari a mount could
+ * stay empty until a reload (no canvas, no ink shown, the pen drew nothing), e.g. while the
+ * canvas memory a PDF export used was not yet given back. Mount again, waiting a little
+ * longer each time, until it starts.
  */
 let excalMountWatch = { key: null, tries: 0, timer: 0 };
 function watchExcalidrawMount(slideKey) {
@@ -4971,7 +4972,7 @@ function watchExcalidrawMount(slideKey) {
             excalMountWatch.tries = 0;
             return;
         }
-        if (excalMountWatch.tries >= 3) {
+        if (excalMountWatch.tries >= 6) {
             console.error('[Quarto Ink] Excalidraw did not start for', slideKey);
             return;
         }
@@ -4982,7 +4983,7 @@ function watchExcalidrawMount(slideKey) {
         if (host) host.replaceChildren();
         state.lastMountedSlideKey = null;
         syncAnnotationEngineMount();
-    }, 1500);
+    }, Math.min(10000, 1500 * 2 ** excalMountWatch.tries));
 }
 
 // --- INK-TO-SHAPE (SMART SHAPE SNAPPING) HELPERS ---

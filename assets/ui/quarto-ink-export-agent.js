@@ -427,6 +427,9 @@
             qiRoot: body,
         });
         ctx.drawImage(content, 0, 0, canvas.width, canvas.height);
+        // Pixels given back at once (iPad Safari has little canvas memory and frees it late).
+        content.width = 0;
+        content.height = 0;
         let words = [];
         try {
             words = collectWords(win, [slideEl, ...chrome], width, height);
@@ -437,6 +440,8 @@
         const b = reveal.getSlidesElement().getBoundingClientRect();
         // An ImageBitmap is transferred to the host without a copy.
         const bitmap = await win.createImageBitmap(canvas);
+        canvas.width = 0;
+        canvas.height = 0;
         return { bitmap, width, height, words, slideRect: { x: b.left, y: b.top, width: b.width, height: b.height } };
     }
 
