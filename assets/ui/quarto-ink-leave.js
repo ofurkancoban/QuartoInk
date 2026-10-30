@@ -18,6 +18,7 @@
     // Open decks other than the visible one that were left with unsaved ink: doc id -> name.
     const unsavedOthers = new Map();
     let dialogOpen = false;
+    let saving = false; // a save chosen in the dialog is running: the deck must stay open
 
     function hash(text) {
         let h = 2166136261;
@@ -216,7 +217,7 @@
      * ink is shown first, as saving needs it on screen.
      */
     async function beforeClose(id) {
-        if (dialogOpen) return false;
+        if (dialogOpen || saving) return false;
         const docs = window.QuartoInkDocs ? window.QuartoInkDocs.list() : [];
         const doc = docs.find((d) => d.id === id);
         if (!doc) return true;
@@ -236,9 +237,14 @@
             unsavedOthers.delete(id);
             return true;
         }
-        const saved = await save(choice);
-        if (saved) unsavedOthers.delete(id);
-        return saved;
+        saving = true;
+        try {
+            const saved = await save(choice);
+            if (saved) unsavedOthers.delete(id);
+            return saved;
+        } finally {
+            saving = false;
+        }
     }
 
     window.addEventListener('beforeunload', (e) => {

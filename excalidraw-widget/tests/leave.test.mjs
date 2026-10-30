@@ -108,6 +108,10 @@ describe('Save before leaving', () => {
             await closeTab(page);
             await page.waitForSelector(dialog);
             await page.click(`${dialog} [data-leave="both"]`);
+            // Closing again while the PDF is made (the HTML is already saved) waits for it.
+            await page.evaluate(() => document.querySelector('.qi-doc-tab.is-active .qi-doc-tab-close').click());
+            await page.waitForTimeout(300);
+            assert.equal(await openCount(page), 1, 'the deck stays open while its PDF is made');
             // The PDF is ready long after the tap: it is offered again (as on iPad), or saved at once.
             const offer = page.locator('.qi-dialog-card button', { hasText: 'Save PDF' });
             await Promise.race([

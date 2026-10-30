@@ -577,7 +577,9 @@
         let ready = false;
         try {
             await loadAgent();
-            ready = await agentCall('isReady');
+            // A deck shown a moment ago (or on a slow iPad) may still be starting Reveal.
+            const until = Date.now() + 8000;
+            while (!(ready = await agentCall('isReady')) && Date.now() < until) await new Promise((r) => setTimeout(r, 250));
         } catch (e) {
             console.warn('[QuartoInkExport] agent', e);
         }
@@ -666,13 +668,29 @@
             qiAlert('Nothing to export', 'The presentation has no slides yet.');
             return;
         }
-        if (!(await prepare())) return;
+        // Shown at once: loading the export code can take a few seconds on an iPad.
         const current = job = { cancelled: false };
+        const progress = showProgress(annotations ? 'Exporting PDF with ink' : 'Exporting PDF', () => { current.cancelled = true; });
+        progress.update(0, 1, 'Preparing the presentation...');
+        if (!(await prepare()) || current.cancelled) {
+            progress.close();
+            job = null;
+            if (current.cancelled) setStatus('PDF export cancelled');
+            return false;
+        }
         const tabMode = getTabMode();
         const withNotes = getNotesInPdf();
-        const start = await agentCall('indices');
-        const startScope = await agentCall('activeTabScope');
-        const progress = showProgress(annotations ? 'Exporting PDF with ink' : 'Exporting PDF', () => { current.cancelled = true; });
+        let start;
+        let startScope;
+        try {
+            start = await agentCall('indices');
+            startScope = await agentCall('activeTabScope');
+        } catch (e) {
+            progress.close();
+            job = null;
+            qiAlert('Export failed', `The PDF could not be created. ${e && e.message ? e.message : ''}`.trim());
+            return false;
+        }
         const pages = [];
         let pdf = null;
         let layout = null;
