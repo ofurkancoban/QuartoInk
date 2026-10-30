@@ -4939,6 +4939,7 @@ function syncAnnotationEngineMount() {
         uiTheme: getExcalPinnedUiTheme()
     });
     queueApplyQuartoExcalidrawToolFromState();
+    watchExcalidrawMount(slideKey);
     /* Full remount: reopen menu. In-place slide swap already sets `openMenu` when preserveShapeMenu is true. */
     if (state.excalToolPanelOpen && window.QuartoInkExcalidraw) {
         requestAnimationFrame(() => {
@@ -4952,6 +4953,36 @@ function syncAnnotationEngineMount() {
             });
         });
     }
+}
+
+/**
+ * Excalidraw should report its API within moments of a mount. On iPad Safari, after a deck
+ * was closed (seen after saving it as PDF and HTML), a mount could stay empty until a reload:
+ * no canvas, so the pen drew nothing. Mount again, a couple of times, when that happens.
+ */
+let excalMountWatch = { key: null, tries: 0, timer: 0 };
+function watchExcalidrawMount(slideKey) {
+    if (excalMountWatch.key !== slideKey) excalMountWatch = { key: slideKey, tries: 0, timer: 0 };
+    clearTimeout(excalMountWatch.timer);
+    excalMountWatch.timer = setTimeout(() => {
+        const excal = window.QuartoInkExcalidraw;
+        if (!excal || state.annotationEngine !== 'excalidraw' || state.lastMountedSlideKey !== slideKey) return;
+        if (excal.getAPI()) {
+            excalMountWatch.tries = 0;
+            return;
+        }
+        if (excalMountWatch.tries >= 3) {
+            console.error('[Quarto Ink] Excalidraw did not start for', slideKey);
+            return;
+        }
+        excalMountWatch.tries += 1;
+        console.warn('[Quarto Ink] Excalidraw did not start, mounting again for', slideKey);
+        try { excal.unmount(); } catch (_e) {}
+        const host = _$('#excalidraw-host');
+        if (host) host.replaceChildren();
+        state.lastMountedSlideKey = null;
+        syncAnnotationEngineMount();
+    }, 1500);
 }
 
 // --- INK-TO-SHAPE (SMART SHAPE SNAPPING) HELPERS ---

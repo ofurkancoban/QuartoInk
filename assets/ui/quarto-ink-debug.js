@@ -11,6 +11,7 @@
     if (!/[?&]debug=1(&|$)/.test(location.search)) return;
 
     const events = [];
+    const problems = []; // errors and Excalidraw mounts, kept apart from the busy input list
     let panel = null;
 
     function describe(el) {
@@ -22,7 +23,7 @@
 
     function note(text) {
         events.push(`${(performance.now() / 1000).toFixed(1)} ${text}`);
-        if (events.length > 12) events.shift();
+        if (events.length > 8) events.shift();
     }
 
     // Seen first (capture) and last (bubble): whether it was stopped or prevented in between.
@@ -41,6 +42,40 @@
         const t = e.changedTouches && e.changedTouches[0];
         note(`touchstart ${t && t.touchType ? t.touchType : '?'} x${e.touches.length} ${describe(e.target)}`);
     }, true);
+
+    function problem(text) {
+        problems.push(`${(performance.now() / 1000).toFixed(1)} ${String(text).slice(0, 160)}`);
+        if (problems.length > 6) problems.shift();
+    }
+    window.addEventListener('error', (e) => problem(`error: ${e.message || (e.error && e.error.message) || e}`));
+    window.addEventListener('unhandledrejection', (e) => problem(`rejection: ${(e.reason && e.reason.message) || e.reason}`));
+    ['error', 'warn'].forEach((level) => {
+        const original = console[level];
+        console[level] = function (...args) {
+            try { problem(`${level}: ${args.map((a) => (a && a.message) || String(a)).join(' ')}`); } catch (_e) {}
+            return original.apply(this, args);
+        };
+    });
+
+    /** Note each Excalidraw mount and whether its API arrived (the bundle loads late). */
+    function watchMounts() {
+        const excal = window.QuartoInkExcalidraw;
+        if (!excal || excal.__qiDebugWrapped) return;
+        excal.__qiDebugWrapped = true;
+        const mount = excal.mount;
+        excal.mount = function (host, props) {
+            const key = props && props.slideKey;
+            let result;
+            try {
+                result = mount.apply(this, arguments);
+            } catch (e) {
+                problem(`mount ${key} threw: ${e && e.message}`);
+                throw e;
+            }
+            setTimeout(() => problem(`mount ${key}: api ${excal.getAPI() ? 'ok' : 'MISSING'} after 1s`), 1000);
+            return result;
+        };
+    }
 
     function flag(name, value) {
         return `${name}: ${value === undefined ? '-' : (typeof value === 'object' && value !== null ? 'set' : String(value))}`;
@@ -81,7 +116,8 @@
         }
         let lines;
         try { lines = stateLines(); } catch (e) { lines = [`state error: ${e && e.message}`]; }
-        panel.textContent = `${lines.join('\n')}\n--\n${events.join('\n')}`;
+        watchMounts();
+        panel.textContent = `${lines.join('\n')}\n-- problems\n${problems.join('\n') || 'none'}\n-- input\n${events.join('\n')}`;
     }
 
     function start() {

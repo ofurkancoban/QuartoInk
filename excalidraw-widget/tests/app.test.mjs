@@ -39,6 +39,32 @@ describe('Quarto Ink app', () => {
         });
     });
 
+    it('mounts Excalidraw again when a mount stays empty, so the pen still draws', async () => {
+        await withDeck(async ({ page }) => {
+            // As seen on iPad after closing a deck: the next mount never reports its API.
+            await page.evaluate(() => {
+                const excal = window.QuartoInkExcalidraw;
+                const mount = excal.mount;
+                let swallowed = false;
+                excal.mount = function () {
+                    if (!swallowed) {
+                        swallowed = true;
+                        return undefined;
+                    }
+                    return mount.apply(this, arguments);
+                };
+                excal.unmount();
+                state.lastMountedSlideKey = null;
+                syncAnnotationEngineMount();
+            });
+            assert.equal(await page.evaluate(() => !!window.QuartoInkExcalidraw.getAPI()), false, 'stuck without a canvas');
+            await page.waitForFunction(() => !!window.QuartoInkExcalidraw.getAPI(), null, { timeout: 5000 });
+            await page.waitForTimeout(600);
+            await drawStroke(page, 0.5);
+            assert.equal((await appInfo(page)).count, 1, 'the pen draws again');
+        });
+    });
+
     it('records the whole first stroke after opening a deck', async () => {
         // Regression: with the deck iframe focused, Excalidraw finalized the first stroke on pointerdown.
         await withDeck(async ({ page }) => {
