@@ -368,7 +368,8 @@ describe('Quarto Ink app', () => {
 
     it('opens the property panel without the lavender focus ring', async () => {
         await withDeck(async ({ page }) => {
-            await page.click('#btn-tool-settings');
+            // Tapping the active tool again opens its panel.
+            await page.click('#btn-pen');
             await page.waitForFunction(() => document.getElementById('app').dataset.quartoExcalToolpanelReady === '1');
             const option = await page.$('#excalidraw-host .selected-shape-actions .buttonList label:nth-child(2)');
             await option.click();

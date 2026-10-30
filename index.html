@@ -2665,15 +2665,6 @@ h1, h2, h3 {
     /* Inherit gn-color-swatch styles - no additional overrides needed */
 }
 
-/* Smooth popover chevron rotation */
-#btn-tool-settings svg {
-    transition: transform 0.25s var(--ease-out);
-}
-
-#btn-tool-settings.open svg {
-    transform: rotate(180deg);
-}
-
 
 /* ═══════════════════════════════════════════════
    § 21. DEBUG LOG
@@ -2799,7 +2790,6 @@ h1, h2, h3 {
 <script src="assets/ui/quarto-ink-share.js" defer></script>
 <script src="assets/ui/quarto-ink-recorder.js" defer></script>
 <script src="assets/ui/quarto-ink-leave.js" defer></script>
-<script src="assets/ui/quarto-ink-debug.js" defer></script>
     <script>
     (function() {
         var saved = localStorage.getItem('gn_theme');
@@ -2862,22 +2852,6 @@ h1, h2, h3 {
                 <div class="gn-pill gn-settings-pill">
                     <button class="gn-pill-btn" id="btn-magic-snap" title="Ink to Shape" aria-label="Ink to Shape"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17c2-5 4-8 6-8s1 6 3 6 3-4 4-6"/><rect x="14.5" y="3.5" width="6" height="6" rx="1.2"/><path d="M5 5.5l.6 1.4 1.4.6-1.4.6L5 9.5l-.6-1.4L3 7.5l1.4-.6z" fill="currentColor" stroke="none"/></svg></button>
                     <div class="gn-pill-divider"></div>
-                    <button class="gn-pill-btn" id="btn-tool-settings" title="Tool Settings">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                    </button>
-                    <div id="tool-settings-popover" class="gn-popover hidden">
-                        <div class="settings-row"><label>Opacity</label><input type="range" id="stroke-opacity" min="0.1" max="1" step="0.1" value="1"></div>
-                        <div class="settings-row">
-                            <label>Width</label>
-                            <div style="display:flex; align-items:center; gap:8px; flex:1">
-                                <input type="range" id="stroke-width-slider" min="0.5" max="60" step="0.5" value="1.5" style="width: 100%">
-                                <span id="thickness-val" style="min-width:32px; font-variant-numeric:tabular-nums; font-size:0.75rem; text-align:right">3pt</span>
-                            </div>
-                        </div>
-                        <div class="settings-row"><label><input type="checkbox" id="fill-toggle"> Fill Shapes</label></div>
-                        <div class="settings-row"><label><input type="checkbox" id="ink-to-shape-toggle"> Ink to Shape</label></div>
-                    </div>
-                    <div class="gn-pill-divider"></div>
                     <div class="gn-thickness-group">
                         <button type="button" class="gn-thickness-btn active" data-index="0" aria-label="Thin stroke" title="Thin stroke"><span class="gn-thickness-line"></span></button>
                         <button type="button" class="gn-thickness-btn" data-index="1" aria-label="Medium stroke" title="Medium stroke"><span class="gn-thickness-line"></span></button>
@@ -2938,6 +2912,23 @@ h1, h2, h3 {
                         </button>
                     </div>
                 </div>
+                <button class="gn-btn" id="btn-record" type="button" title="Record the lecture (slides, ink and microphone)" aria-label="Record the lecture" aria-pressed="false">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><circle class="qi-record-dot" cx="12" cy="12" r="4" fill="currentColor" stroke="none"/></svg>
+                    <span class="qi-record-time" aria-hidden="true"></span>
+                </button>
+                <button class="gn-btn" id="btn-audience" type="button" title="Audience window (for a projector)" aria-label="Audience window" aria-pressed="false">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4" width="19" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/><path d="M9 10.5l2 2 4-4.5"/></svg>
+                </button>
+                <button class="gn-btn" id="btn-add-page" type="button" title="Add a blank page after this slide (B)" aria-label="Add a blank page">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M14 3v5h5"/><path d="M12 11v6M9 14h6"/></svg>
+                </button>
+                <button class="gn-btn" id="btn-sidebar-toggle" title="Toggle Navigator (N)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+                </button>
+                <button class="gn-btn" id="btn-fullscreen" type="button" title="Fullscreen" aria-pressed="false">
+                    <svg id="fullscreen-icon-enter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                    <svg id="fullscreen-icon-exit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:none"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                </button>
                 <div style="position:relative;">
                     <button class="gn-btn" id="btn-export" title="Export" aria-haspopup="menu" aria-expanded="false" aria-controls="export-menu">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -2981,23 +2972,6 @@ h1, h2, h3 {
                         </button>
                     </div>
                 </div>
-                <button class="gn-btn" id="btn-sidebar-toggle" title="Toggle Navigator (N)">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
-                </button>
-                <button class="gn-btn" id="btn-record" type="button" title="Record the lecture (slides, ink and microphone)" aria-label="Record the lecture" aria-pressed="false">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><circle class="qi-record-dot" cx="12" cy="12" r="4" fill="currentColor" stroke="none"/></svg>
-                    <span class="qi-record-time" aria-hidden="true"></span>
-                </button>
-                <button class="gn-btn" id="btn-audience" type="button" title="Audience window (for a projector)" aria-label="Audience window" aria-pressed="false">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4" width="19" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/><path d="M9 10.5l2 2 4-4.5"/></svg>
-                </button>
-                <button class="gn-btn" id="btn-add-page" type="button" title="Add a blank page after this slide (B)" aria-label="Add a blank page">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M14 3v5h5"/><path d="M12 11v6M9 14h6"/></svg>
-                </button>
-                <button class="gn-btn" id="btn-fullscreen" type="button" title="Fullscreen" aria-pressed="false">
-                    <svg id="fullscreen-icon-enter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
-                    <svg id="fullscreen-icon-exit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:none"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
-                </button>
                 <div class="gn-pill-divider"></div>
                 <button class="gn-btn" id="btn-theme" title="Toggle Theme">
                     <svg id="theme-icon-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
@@ -4855,10 +4829,6 @@ function setQuartoExcalToolPanelOpen(open) {
 
 /** Tool settings arrow + Excalidraw left panel; closes on tool change or outside click. */
 function closeQuartoToolSettingsPopover() {
-    const pop = _$('#tool-settings-popover');
-    const btn = _$('#btn-tool-settings');
-    if (pop) pop.classList.add('hidden');
-    if (btn) btn.classList.remove('open');
     setQuartoExcalToolPanelOpen(false);
 }
 
@@ -5318,8 +5288,6 @@ function triggerExcalidrawShapeSnap() {
 
 function syncInkToShapeUI() {
     const btn = _$('#btn-magic-snap');
-    const toggle = _$('#ink-to-shape-toggle');
-    if (toggle) toggle.checked = !!state.inkToShapeEnabled;
     if (btn) {
         btn.classList.toggle('active', !!state.inkToShapeEnabled);
         btn.setAttribute('aria-pressed', state.inkToShapeEnabled ? 'true' : 'false');
@@ -5348,8 +5316,6 @@ async function setAnnotationEngine(engine) {
         state.excalToolPanelOpen = false;
         const appElPre = _$('#app');
         if (appElPre) appElPre.removeAttribute('data-quarto-excal-toolpanel');
-        const tsBtnPre = _$('#btn-tool-settings');
-        if (tsBtnPre) tsBtnPre.classList.remove('open');
         window.QuartoInkExcalidraw.unmount();
     }
     state.annotationEngine = next;
@@ -7502,7 +7468,6 @@ window.setDockPos = function(pos) {
     document.getElementById('app').setAttribute('data-dock-pos', pos);
     localStorage.setItem('gn_dock_pos', pos);
     // Refresh popover alignment logic if needed
-    syncPopoverPos(pos);
     // The workspace moves to the other side: after the layout has settled (the resize observer
     // misses a move that keeps its size).
     if (typeof syncExcalToolPanelTop === 'function') {
@@ -7510,15 +7475,6 @@ window.setDockPos = function(pos) {
         setTimeout(syncExcalToolPanelTop, 400);
     }
 };
-
-function syncPopoverPos(pos) {
-    const pop = document.getElementById('tool-settings-popover');
-    if (!pop) return;
-    pop.className = 'gn-popover hidden';
-    if (pos === 'left') pop.classList.add('pop-right');
-    else if (pos === 'right') pop.classList.add('pop-left');
-    else if (pos === 'bottom') pop.classList.add('pop-top');
-}
 
 // Load initial pos
 const initialPos = localStorage.getItem('gn_dock_pos') || 'top';
@@ -9068,8 +9024,6 @@ function setupEventListeners() {
             if (state.annotationEngine === 'excalidraw') {
                 const nextOpen = t === 'magnifier' ? false : (wasSameTool ? !wasPanelOpen : true);
                 setQuartoExcalToolPanelOpen(nextOpen);
-                const tsBtn = _$('#btn-tool-settings');
-                if (tsBtn) tsBtn.classList.toggle('open', nextOpen);
             } else {
                 closeQuartoToolSettingsPopover();
             }
@@ -9164,25 +9118,10 @@ function setupEventListeners() {
         if (state.annotationEngine === 'excalidraw') syncToolbarStrokeToExcalidraw();
     });
 
-    _on('#btn-tool-settings', 'click', (e) => {
-        e.stopPropagation();
-        const pop = _$('#tool-settings-popover');
-        const btn = _$('#btn-tool-settings');
-        if (state.annotationEngine === 'excalidraw') {
-            const nextOpen = !(btn && btn.classList.contains('open'));
-            if (btn) btn.classList.toggle('open', nextOpen);
-            setQuartoExcalToolPanelOpen(nextOpen);
-            return;
-        }
-        pop.classList.toggle('hidden');
-        btn.classList.toggle('open', !pop.classList.contains('hidden'));
-    });
     // Close popovers on outside click
     document.addEventListener('click', (e) => {
-        const pop = _$('#tool-settings-popover');
-        const btn = _$('#btn-tool-settings');
-        if (state.annotationEngine === 'excalidraw' && btn && btn.classList.contains('open')) {
-            if (btn.contains(e.target)) return;
+        // The tool panel (opened by tapping the active tool again).
+        if (state.annotationEngine === 'excalidraw' && state.excalToolPanelOpen) {
             const t = e.target;
             if (t.closest && (
                 t.closest('.gn-main-tools') ||
@@ -9194,12 +9133,7 @@ function setupEventListeners() {
                 t.closest('[data-radix-focus-guard]')
             )) return;
             setQuartoExcalToolPanelOpen(false);
-            btn.classList.remove('open');
             return;
-        }
-        if (pop && btn && !pop.classList.contains('hidden') && !pop.contains(e.target) && !btn.contains(e.target)) {
-            pop.classList.add('hidden');
-            btn.classList.remove('open');
         }
         const clearMenu = _$('#clear-menu');
         const clearBtn = _$('#btn-clear');
@@ -9210,19 +9144,6 @@ function setupEventListeners() {
     // Final stage log
     window.log('UI ready for interaction.');
 
-    _on('#stroke-opacity', 'input', (e) => { state.opacity = parseFloat(e.target.value); });
-
-
-
-
-
-
-    _on('#fill-toggle', 'change', (e) => { state.isFilled = e.target.checked; });
-    _on('#ink-to-shape-toggle', 'change', (e) => {
-        state.inkToShapeEnabled = e.target.checked;
-        saveToLocalStorage();
-        syncInkToShapeUI();
-    });
     _on('#btn-magic-snap', 'click', () => {
         state.inkToShapeEnabled = !state.inkToShapeEnabled;
         saveToLocalStorage();

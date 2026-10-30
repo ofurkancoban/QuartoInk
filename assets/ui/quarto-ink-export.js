@@ -295,8 +295,9 @@
 
     // --- The user's notes below a slide -----------------------------------------------
 
+    /** On unless turned off: notes the user wrote are meant to be kept with the slides. */
     function getNotesInPdf() {
-        try { return localStorage.getItem(NOTES_SETTING_KEY) === '1'; } catch (_e) { return false; }
+        try { return localStorage.getItem(NOTES_SETTING_KEY) !== '0'; } catch (_e) { return true; }
     }
 
     function setNotesInPdf(on) {

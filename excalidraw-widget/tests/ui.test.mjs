@@ -96,7 +96,8 @@ describe('Interface details', () => {
         try {
             await openDecks(page, [['a.html', deckA]]);
             await waitForDeck(page, 'a.html');
-            await page.click('#btn-tool-settings');
+            // Tapping the active tool again opens its panel.
+            await page.click('#btn-pen');
             await page.waitForFunction(() => document.getElementById('app').dataset.quartoExcalToolpanelReady === '1');
             await page.waitForFunction(() => [...document.querySelectorAll('#excalidraw-host .selected-shape-actions h3')]
                 .some((h) => h.textContent.trim() === 'Fill (closed strokes)'));
