@@ -62,8 +62,21 @@
                 dy: ((m.y + cam.scrollY) * cam.zoom - m.y) / w,
             };
         }
+        // A slide zoomed with a pinch: the audience sees the same part of it.
+        let zoom = null;
+        if (!board && wb && wb.isSlideZoomed()) {
+            const cam = wb.camera();
+            const m = state.slidesBox || state.slideMetrics || { x: 0, y: 0, width: 1 };
+            const w = m.width || 1;
+            zoom = {
+                zoom: cam.zoom,
+                dx: ((m.x + cam.scrollX) * cam.zoom - m.x) / w,
+                dy: ((m.y + cam.scrollY) * cam.zoom - m.y) / w,
+            };
+        }
         return {
             type: 'qi-audience-slide',
+            zoom,
             h,
             v,
             f: typeof state.currentFragment === 'number' ? state.currentFragment : undefined,

@@ -246,8 +246,14 @@ function isDefaultCamera(scrollX, scrollY, zoom) {
   return scrollX === 0 && scrollY === 0 && (zoom?.value ?? 1) === 1;
 }
 
-// Blank pages are not tied to a slide: there the camera may zoom and pan (set by the host).
+// The camera may zoom and pan (set by the host): on blank pages, and on slides by a pinch.
 let cameraFree = false;
+// Trackpad scrolling and pinching move it only on blank pages; on slides they are swallowed.
+let wheelFree = false;
+
+function setWheelFree(on) {
+  wheelFree = !!on;
+}
 
 function setCameraFree(on) {
   cameraFree = !!on;
@@ -1052,7 +1058,7 @@ function ExcalidrawWidget(props) {
     if (!host) return undefined;
     const onWheel = (e) => {
       if (e.target instanceof Element && e.target.closest('.Island, .layer-ui__wrapper__top-right, .dropdown-menu')) return;
-      if (cameraFree) return; // a blank page: Excalidraw zooms and pans
+      if (wheelFree) return; // a blank page: Excalidraw zooms and pans
       e.preventDefault();
       e.stopPropagation();
     };
@@ -1201,6 +1207,8 @@ function ExcalidrawWidget(props) {
           if (excalidrawRootRef.current === api) return;
           excalidrawRootRef.current = api;
           currentExcalAPI = api;
+          // A new canvas starts at its own camera: the host lines the deck up with it.
+          queueMicrotask(notifyCamera);
 
           const initScene = () => {
             if (isUserDrawing(api)) return;
@@ -1662,6 +1670,7 @@ window.QuartoInkExcalidraw = {
   exportSerializedToSvg,
   getSceneBounds,
   setCameraFree,
+  setWheelFree,
   getAPI,
   getTextFontSize,
   setTextFontSize,

@@ -300,6 +300,7 @@
         state.annotations.clear();
         state.excalidrawScenes = new Map();
         state.slideMetricsBySlide = new Map();
+        state.slidesBox = null; // reported again by this deck (ink is fitted to it)
         state.history = [];
         state.redoStack = [];
         state.slides = doc.slides || [];

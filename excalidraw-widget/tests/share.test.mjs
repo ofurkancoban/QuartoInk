@@ -94,4 +94,56 @@ describe('Deck with ink', () => {
             await viewer.context.close();
         }
     });
+    it('keeps the ink on the same spot of the slide in another window size', async () => {
+        // Where the stroke sits relative to the heading, in slide widths.
+        const inkOnSlide = (page) => page.evaluate(() => {
+            const el = window.QuartoInkExcalidraw.getAPI().getSceneElements().find((e) => !e.isDeleted);
+            const host = document.getElementById('excalidraw-host').getBoundingClientRect();
+            return { x: host.left + el.x, y: host.top + el.y, w: el.width, slide: state.slidesBox.width };
+        });
+        const relative = async (page) => {
+            const h = await page.frameLocator('#content-frame').locator('h1').first().boundingBox();
+            const ink = await inkOnSlide(page);
+            return { dx: (ink.x - h.x) / ink.slide, dy: (ink.y - h.y) / ink.slide, w: ink.w / ink.slide };
+        };
+        const close = (a, b, what) => {
+            for (const k of ['dx', 'dy', 'w']) assert.ok(Math.abs(a[k] - b[k]) < 0.01, `${what}: ${k} ${a[k]} vs ${b[k]}`);
+        };
+
+        const presenter = await openApp(browser, server, { viewport: { width: 1440, height: 900 } });
+        let shared;
+        let drawn;
+        try {
+            const { page } = presenter;
+            await openDecks(page, [['talk.html', deckA]]);
+            await waitForDeck(page, 'talk.html');
+            await drawStroke(page, 0.6);
+            drawn = await relative(page);
+
+            // The same window made smaller: the ink follows the slide.
+            await page.setViewportSize({ width: 1100, height: 760 });
+            await page.waitForFunction((w) => state.slidesBox && Math.abs(state.slidesBox.width - w) > 20, drawn.slide || 0).catch(() => {});
+            await page.waitForTimeout(1200);
+            close(await relative(page), drawn, 'after a resize');
+
+            await page.click('#btn-export');
+            const [download] = await Promise.all([page.waitForEvent('download'), page.click('#btn-export-shared')]);
+            shared = fs.readFileSync(await download.path(), 'utf8');
+        } finally {
+            await presenter.context.close();
+        }
+
+        // Opened on a smaller screen.
+        const viewer = await openApp(browser, server, { viewport: { width: 1000, height: 700 } });
+        try {
+            const { page } = viewer;
+            await openDecks(page, [['talk-with-ink.html', shared]]);
+            await waitForDeck(page, 'talk-with-ink.html');
+            await page.waitForTimeout(1200);
+            close(await relative(page), drawn, 'opened elsewhere');
+            assert.deepEqual(viewer.errors, []);
+        } finally {
+            await viewer.context.close();
+        }
+    });
 });

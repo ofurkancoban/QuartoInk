@@ -104,28 +104,55 @@ describe('Interface details', () => {
             const box = await (await page.$('#qi-panel-thickness input')).boundingBox();
             assert.ok(box.width >= 140, `slider wide enough (${box.width})`);
 
-            // A width between the presets, used by the next stroke.
-            await page.mouse.click(box.x + box.width * 0.35, box.y + box.height / 2);
-            await page.waitForFunction(() => {
-                const w = window.QuartoInkExcalidraw.getAPI().getAppState().currentItemStrokeWidth;
-                return w > 2 && w < 4;
-            });
-            const chosen = await page.evaluate(() => state.strokeWidth);
-            assert.equal(await page.textContent('#thickness-val'), `${chosen} pt`);
+            // Defaults: 0.8, 2 and 4, drawn at those widths.
+            assert.deepEqual(await page.evaluate(() => state.thicknessPresets), [0.8, 2, 4]);
+            assert.equal(await page.evaluate(() => window.QuartoInkExcalidraw.getAPI().getAppState().currentItemStrokeWidth), 0.8);
+
+            // The slider changes the selected preset (the middle one here).
+            await page.click('.gn-thickness-btn[data-index="1"]');
+            await page.waitForFunction(() => window.QuartoInkExcalidraw.getAPI().getAppState().currentItemStrokeWidth === 2);
+            await page.fill('#qi-panel-thickness input', '3.3');
+            await page.waitForFunction(() => window.QuartoInkExcalidraw.getAPI().getAppState().currentItemStrokeWidth === 3.3);
+            assert.deepEqual(await page.evaluate(() => state.thicknessPresets), [0.8, 3.3, 4]);
+            assert.equal(await page.textContent('#thickness-val'), '3.3 pt');
+            assert.equal(await page.evaluate(() => document.querySelector('.gn-thickness-btn.active').dataset.index), '1');
             await page.keyboard.press('Escape');
             await page.mouse.click(5, 5);
             await drawStroke(page, 0.6);
             const widths = await page.evaluate(() => window.QuartoInkExcalidraw.getAPI().getSceneElements().map((e) => e.strokeWidth));
-            assert.ok(widths.length === 1 && widths[0] > 2 && widths[0] < 4, `stroke between medium and thick (${widths})`);
+            assert.deepEqual(widths, [3.3], 'the stroke has the chosen width');
 
-            // The presets still give Excalidraw's widths exactly.
+            // Kept in the browser: after a reload the middle preset is still 3.3.
+            await page.reload();
+            await page.waitForFunction(() => typeof state !== 'undefined' && Array.isArray(state.thicknessPresets));
+            assert.deepEqual(await page.evaluate(() => state.thicknessPresets), [0.8, 3.3, 4]);
+            await waitForDeck(page, 'a.html');
             await page.click('.gn-thickness-btn[data-index="2"]');
             await page.waitForFunction(() => window.QuartoInkExcalidraw.getAPI().getAppState().currentItemStrokeWidth === 4);
+            await page.click('#btn-pen');
+            await page.waitForSelector('#qi-panel-thickness input');
 
             // Other tools keep Layers.
             await page.click('#btn-rect');
             await page.click('#btn-rect');
             await page.waitForFunction(() => !document.getElementById('qi-panel-thickness'));
+            assert.deepEqual(errors, []);
+        } finally {
+            await context.close();
+        }
+    });
+
+    it('turns the old default pen widths into the new ones', async () => {
+        const { page, context, errors } = await openApp(browser, server);
+        try {
+            await page.evaluate(() => {
+                localStorage.setItem('gn_thickness_presets_v2', JSON.stringify({ pen: [1.5, 3, 10], highlighter: [4, 8, 16] }));
+                localStorage.setItem('gn_tool_widths', JSON.stringify({ pen: 3, highlighter: 8, eraser: 20, rect: 3, circle: 3, arrow: 10, line: 3 }));
+            });
+            await page.reload();
+            await page.waitForFunction(() => typeof state !== 'undefined' && !!window.QuartoInkDocs);
+            assert.deepEqual(await page.evaluate(() => state.thicknessPresets), [0.8, 2, 4]);
+            assert.deepEqual(await page.evaluate(() => [state.toolWidths.pen, state.toolWidths.rect, state.toolWidths.arrow, state.toolWidths.highlighter]), [2, 2, 4, 8]);
             assert.deepEqual(errors, []);
         } finally {
             await context.close();

@@ -10,9 +10,14 @@
  * skipping them when the deck has the keyboard (QI_NAV_LOCK). The PDF export puts each
  * page after its slide, as it is on screen at 100%.
  *
- * Unlike slides, a page can be zoomed in and panned: a two-finger pinch on a touch screen (done
- * here, as a one-finger touch is a swipe to the next slide) or the trackpad (Excalidraw's own).
- * It never zooms out past 100% or pans past its edges, so all ink stays on the exported page.
+ * A page can be zoomed in and panned: a two-finger pinch on a touch screen (done here, as a
+ * one-finger touch is a swipe to the next slide) or the trackpad (Excalidraw's own). It never
+ * zooms out past 100% or pans past its edges, so all ink stays on the exported page.
+ *
+ * A slide zooms the same way with a pinch (not the trackpad, which scrolls past it): the ink
+ * follows Excalidraw's camera and the deck's frame is scaled and moved to match, so the ink
+ * stays where it was written. The ink is kept at 100%, so the export does not change. Going to
+ * another slide shows it at 100% again.
  */
 (function () {
     'use strict';
@@ -258,13 +263,18 @@
         chip.querySelector('.qi-wb-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
     }
 
-    /** Show or hide the sheet and fit it to the slide box; tell the deck which keys to hold back. */
-    function render() {
+    /**
+     * Show or hide the sheet and fit it to the slide box; tell the deck which keys to hold back.
+     * `cam` is a camera just set, before Excalidraw reports it.
+     */
+    function render(cam) {
         ensureElements();
         const cur = current();
         document.body.classList.toggle('qi-on-whiteboard', !!cur);
         const excal = window.QuartoInkExcalidraw;
-        if (excal && excal.setCameraFree) excal.setCameraFree(!!cur);
+        if (excal && excal.setCameraFree) excal.setCameraFree(zoomable());
+        if (excal && excal.setWheelFree) excal.setWheelFree(!!cur);
+        syncSlideZoom(cam || camera());
         if (sheet) sheet.style.display = cur ? 'block' : 'none';
         if (chip) chip.style.display = cur ? 'flex' : 'none';
         if (!cur) setChipOpen(false);
@@ -274,7 +284,7 @@
             const base = (state.baseSlideSize && state.baseSlideSize.width) || m.width || 1;
             const scale = m.width / base || 1;
             // The lines follow the page's zoom and pan (scene -> screen: (p + scroll) * zoom).
-            const cam = camera();
+            cam = cam || camera();
             Object.assign(sheet.style, cssBackground(cur.page.style, scale * cam.zoom, (m.x + cam.scrollX) * cam.zoom, (m.y + cam.scrollY) * cam.zoom));
             const box = sheet.firstElementChild;
             Object.assign(box.style, { left: `${m.x}px`, top: `${m.y}px`, width: `${m.width}px`, height: `${m.height}px` });
@@ -290,6 +300,48 @@
         }
         updateIndicator(cur);
         sendNavLock();
+    }
+
+    let slideZoomBtn = null;
+
+    /** A zoomed slide: its deck frame scaled and moved like the ink, and a button back to 100%. */
+    function syncSlideZoom(cam) {
+        const frame = document.getElementById('content-frame');
+        const zoomed = onSlide() && !isDefaultCam(cam);
+        document.body.classList.toggle('qi-slide-zoomed', zoomed);
+        if (frame) {
+            if (zoomed) {
+                // Scene -> screen is (p + scroll) * zoom, p in the drawing layer's px; the frame
+                // sits at `o` in it and is scaled about its own corner.
+                const host = document.getElementById('excalidraw-host');
+                const ox = host ? frame.offsetLeft - host.offsetLeft : 0;
+                const oy = host ? frame.offsetTop - host.offsetTop : 0;
+                const tx = (ox + cam.scrollX) * cam.zoom - ox;
+                const ty = (oy + cam.scrollY) * cam.zoom - oy;
+                frame.style.transformOrigin = '0 0';
+                frame.style.transform = `translate(${tx}px, ${ty}px) scale(${cam.zoom})`;
+            } else if (frame.style.transform) {
+                frame.style.removeProperty('transform');
+                frame.style.removeProperty('transform-origin');
+            }
+        }
+        const stage = document.getElementById('editor-stage');
+        if (!slideZoomBtn && stage && zoomed) {
+            slideZoomBtn = document.createElement('button');
+            slideZoomBtn.type = 'button';
+            slideZoomBtn.id = 'qi-slide-zoom';
+            slideZoomBtn.title = 'Back to 100%';
+            slideZoomBtn.addEventListener('click', () => setCamera(0, 0, 1));
+            stage.appendChild(slideZoomBtn);
+        }
+        if (slideZoomBtn) {
+            slideZoomBtn.hidden = !zoomed;
+            if (zoomed) {
+                const text = `${Math.round(cam.zoom * 100)}% · 100%`;
+                if (slideZoomBtn.textContent !== text) slideZoomBtn.textContent = text;
+                slideZoomBtn.setAttribute('aria-label', `Zoomed to ${Math.round(cam.zoom * 100)}%. Back to 100%`);
+            }
+        }
     }
 
     function updateIndicator(cur) {
@@ -316,6 +368,28 @@
 
     // --- Zoom and pan --------------------------------------------------------------------------
 
+    /** A slide of an open deck (not a blank page), drawn on with Excalidraw: a pinch zooms it. */
+    function onSlide() {
+        return !current() && !!state.currentFileName && state.annotationEngine === 'excalidraw';
+    }
+
+    function zoomable() {
+        return !!current() || onSlide();
+    }
+
+    function isDefaultCam(cam) {
+        return cam.zoom === 1 && cam.scrollX === 0 && cam.scrollY === 0;
+    }
+
+    /** Zoomed in: a one-finger swipe then does not go to another slide or page. */
+    function isZoomed() {
+        return zoomable() && camera().zoom > 1.0001;
+    }
+
+    function isSlideZoomed() {
+        return onSlide() && !isDefaultCam(camera());
+    }
+
     function excalApi() {
         const excal = window.QuartoInkExcalidraw;
         return excal && excal.getAPI ? excal.getAPI() : null;
@@ -324,7 +398,7 @@
     function camera() {
         const api = excalApi();
         const a = api && api.getAppState();
-        if (!a || !current()) return { scrollX: 0, scrollY: 0, zoom: 1 };
+        if (!a || !zoomable()) return { scrollX: 0, scrollY: 0, zoom: 1 };
         return { scrollX: a.scrollX || 0, scrollY: a.scrollY || 0, zoom: (a.zoom && a.zoom.value) || 1 };
     }
 
@@ -350,12 +424,13 @@
 
     function setCamera(scrollX, scrollY, zoom) {
         const api = excalApi();
-        if (!api || !current()) return;
+        if (!api || !zoomable()) return;
         ({ scrollX, scrollY, zoom } = clampCamera(scrollX, scrollY, zoom));
         try {
             api.updateScene({ appState: { scrollX, scrollY, zoom: { value: zoom } }, commitToHistory: false });
         } catch (_e) {}
-        render();
+        // Excalidraw applies it a moment later: draw the deck and lines for it now.
+        render({ scrollX, scrollY, zoom });
     }
 
     let pinch = null;
@@ -380,7 +455,7 @@
             holdUntilLift = false;
             pinchGesture('reset');
         }
-        if (!current() || !e.touches || e.touches.length !== 2) return;
+        if (!zoomable() || !e.touches || e.touches.length !== 2) return;
         if (Array.prototype.some.call(e.touches, isStylus)) return;
         const host = document.getElementById('excalidraw-host');
         const stage = document.getElementById('editor-stage');
@@ -432,7 +507,7 @@
 
     /** Pull a camera set elsewhere (trackpad, hand tool, a resize) back onto the page. */
     function keepOnPage() {
-        if (!current()) return;
+        if (!zoomable()) return;
         const cam = camera();
         const c = clampCamera(cam.scrollX, cam.scrollY, cam.zoom);
         const off = Math.abs(c.scrollX - cam.scrollX) > 0.01 || Math.abs(c.scrollY - cam.scrollY) > 0.01 || Math.abs(c.zoom - cam.zoom) > 0.0001;
@@ -448,7 +523,9 @@
      */
     function exportBox(slideKey, id, box) {
         const excal = window.QuartoInkExcalidraw;
-        const scene = state.excalidrawScenes.get(keyOf(slideKey, id));
+        let scene = state.excalidrawScenes.get(keyOf(slideKey, id));
+        // In the slide box's px as it is now (drawn maybe in another layout: index.html).
+        if (typeof fitSceneToBox === 'function') scene = fitSceneToBox(scene, box);
         const serialized = typeof scene === 'string' ? scene : (scene ? JSON.stringify(scene) : null);
         const bounds = excal && excal.getSceneBounds ? excal.getSceneBounds(serialized) : null;
         if (!bounds || !(box.width > 0 && box.height > 0)) return { box, factor: 1 };
@@ -518,7 +595,7 @@
 
     window.QuartoInkWhiteboard = {
         STYLES, pages, keyOf, current, currentKey, add, enter, leave, setStyle, remove,
-        handleNavigate, onSlideChange, render, renderPage, exportBox, camera, setCamera,
+        handleNavigate, onSlideChange, render, renderPage, exportBox, camera, setCamera, isZoomed, isSlideZoomed,
     };
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

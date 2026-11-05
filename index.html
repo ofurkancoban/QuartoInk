@@ -3983,12 +3983,6 @@ function getActiveThicknessPresets() {
     return state.tool === 'highlighter' ? state.thicknessPresetsHighlighter : state.thicknessPresets;
 }
 
-/** Pen tier 0|1|2 ↔ Excalidraw STROKE_WIDTH (1, 2, 4) - same order as main thickness buttons and Island swatches. */
-function quartoThicknessTierToExcalidrawStroke(tier) {
-    const t = Math.min(2, Math.max(0, tier | 0));
-    return t === 0 ? 1 : t === 1 ? 2 : 4;
-}
-
 /** Normalized Excal pen width from embed → thickness tier (matches `normalizeExcalStrokeWidth` buckets). */
 function excalPenNormalizedWidthToThicknessTier(excalNorm) {
     const n = Number(excalNorm);
@@ -4016,95 +4010,69 @@ function nearestThicknessPresetIndexForWidth(widthPt) {
 }
 
 /**
- * Toolbar width (pt) -> Excalidraw stroke width. The three presets give Excalidraw's 1, 2 and 4
- * exactly; widths between them (the panel's thickness slider) follow a straight line.
+ * Toolbar width -> Excalidraw stroke width. The pen and shapes draw at their width as it is;
+ * the highlighter's widths are 4x larger numbers for the same Excalidraw widths (4, 8, 16 ->
+ * 1, 2, 4). The panel's thickness slider sets any width in between.
  */
-const EXCAL_TIER_WIDTHS = [1, 2, 4];
-function thicknessPresetPoints() {
-    const p = getActiveThicknessPresets().slice(0, 3).map(Number);
-    return p.length === 3 && p[0] > 0 && p[0] < p[1] && p[1] < p[2] ? p : null;
+const DEFAULT_PEN_PRESETS = [0.8, 2, 4];
+const OLD_DEFAULT_PEN_PRESETS = [1.5, 3, 10];
+const EXCAL_MIN_WIDTH = 0.3;
+const EXCAL_MAX_WIDTH = 12;
+function excalidrawWidthScale() {
+    return state.tool === 'highlighter' ? 0.25 : 1;
 }
 function quartoBaseWidthToExcalidrawStroke(base) {
-    const p = thicknessPresetPoints();
     const b = Number(base);
-    if (!p || !Number.isFinite(b)) return quartoThicknessTierToExcalidrawStroke(nearestThicknessPresetIndexForWidth(base));
-    const e = EXCAL_TIER_WIDTHS;
-    let w;
-    if (b <= p[0]) w = (e[0] * b) / p[0];
-    else if (b <= p[1]) w = e[0] + ((b - p[0]) / (p[1] - p[0])) * (e[1] - e[0]);
-    else if (b <= p[2]) w = e[1] + ((b - p[1]) / (p[2] - p[1])) * (e[2] - e[1]);
-    else w = (e[2] * b) / p[2];
-    return Math.round(Math.min(16, Math.max(0.25, w)) * 100) / 100;
-}
-/** Excalidraw stroke width -> toolbar width (pt): the inverse of quartoBaseWidthToExcalidrawStroke. */
-function excalidrawStrokeToQuartoBaseWidth(width) {
-    const p = thicknessPresetPoints();
-    const w = Number(width);
-    if (!p || !Number.isFinite(w)) return null;
-    const e = EXCAL_TIER_WIDTHS;
-    let b;
-    if (w <= e[0]) b = (p[0] * w) / e[0];
-    else if (w <= e[1]) b = p[0] + ((w - e[0]) / (e[1] - e[0])) * (p[1] - p[0]);
-    else if (w <= e[2]) b = p[1] + ((w - e[1]) / (e[2] - e[1])) * (p[2] - p[1]);
-    else b = (p[2] * w) / e[2];
-    return Math.round(b * 10) / 10;
+    if (!Number.isFinite(b)) return 2;
+    const w = b * excalidrawWidthScale();
+    return Math.round(Math.min(EXCAL_MAX_WIDTH, Math.max(EXCAL_MIN_WIDTH, w)) * 100) / 100;
 }
 
-/** The panel's thickness slider: its range (pt) for the active tool, and setting a width from it. */
+/** The panel's thickness slider: its range for the active tool, and the width it sets. */
 function strokeWidthSliderRange() {
-    const p = thicknessPresetPoints() || [1.5, 3, 10];
-    return { min: Math.round((p[0] / 3) * 10) / 10, max: p[2] * 2, step: 0.1, value: Number(state.strokeWidth) };
+    const k = excalidrawWidthScale();
+    return { min: EXCAL_MIN_WIDTH / k, max: EXCAL_MAX_WIDTH / k, step: 0.1 / k, value: Number(state.strokeWidth) };
 }
-function setToolStrokeWidth(widthPt) {
-    if (state.tool === 'eraser') return;
+/** The slider changes the selected one of the three presets, which is kept in the browser. */
+function setToolStrokeWidth(width) {
+    if (state.tool === 'eraser' || isTextSizeMode()) return;
     const range = strokeWidthSliderRange();
-    const val = Math.min(range.max, Math.max(range.min, Number(widthPt)));
+    const val = Math.round(Math.min(range.max, Math.max(range.min, Number(width))) * 100) / 100;
     if (!Number.isFinite(val)) return;
+    const presets = getActiveThicknessPresets();
+    const idx = Math.min(Math.max(0, state.thicknessIndex | 0), presets.length - 1);
+    presets[idx] = val;
     state.strokeWidth = val;
     if (state.toolWidths[state.tool] !== undefined) state.toolWidths[state.tool] = val;
     syncThicknessUI();
+    // syncThicknessUI picks the nearest preset: keep the one being changed.
+    state.thicknessIndex = idx;
+    _$$('.gn-thickness-btn').forEach((btn) => btn.classList.toggle('active', parseInt(btn.dataset.index, 10) === idx));
     saveToLocalStorage();
     if (state.annotationEngine === 'excalidraw') syncToolbarStrokeToExcalidraw();
 }
 window.qiStrokeWidth = { range: strokeWidthSliderRange, set: setToolStrokeWidth };
 
-/** Island / Excal → main toolbar: snap to exact preset pt for the tier (1:1 sync). */
+/**
+ * Excalidraw's own stroke width buttons (thin 1, bold 2, extra bold 4) choose the matching
+ * one of the three presets; the stroke then gets that preset's width.
+ */
 function syncMainToolbarThicknessFromExcalPenTier(excalNorm) {
-    // A width between the presets (from the thickness slider): keep it as it is.
-    const between = excalidrawStrokeToQuartoBaseWidth(excalNorm);
-    if (between != null && !EXCAL_TIER_WIDTHS.includes(Number(excalNorm))) {
-        if (Math.abs(Number(state.strokeWidth) - between) >= 0.05) {
-            state.strokeWidth = between;
-            if (state.toolWidths[state.tool] !== undefined) state.toolWidths[state.tool] = between;
-            syncThicknessUI();
-            saveToLocalStorage();
-        }
-        return;
-    }
-    const tier = excalPenNormalizedWidthToThicknessTier(excalNorm);
-    if (tier == null) return;
+    const w = Number(excalNorm);
+    if (!Number.isFinite(w)) return;
     const presets = getActiveThicknessPresets();
-    const exact = presets[tier];
-    if (exact === undefined) return;
-    const w = quartoThicknessTierToExcalidrawStroke(tier);
-    const sameTier =
-        state.thicknessIndex === tier &&
-        Math.abs(Number(state.strokeWidth) - Number(exact)) < 1e-9;
-    if (sameTier) {
-        if (window.QuartoInkExcalidraw && typeof window.QuartoInkExcalidraw.setCurrentItemStrokeWidth === 'function') {
-            window.QuartoInkExcalidraw.setCurrentItemStrokeWidth(w);
-        }
-        return;
+    const tier = excalPenNormalizedWidthToThicknessTier(w);
+    const own = Math.abs(quartoBaseWidthToExcalidrawStroke(state.strokeWidth) - w) < 0.01;
+    if (!own && tier != null && presets[tier] !== undefined) {
+        state.thicknessIndex = tier;
+        state.strokeWidth = presets[tier];
+        if (state.toolWidths[state.tool] !== undefined) state.toolWidths[state.tool] = state.strokeWidth;
+        syncThicknessUI();
+        saveToLocalStorage();
     }
-    state.thicknessIndex = tier;
-    state.strokeWidth = exact;
-    if (state.toolWidths[state.tool] !== undefined) {
-        state.toolWidths[state.tool] = exact;
-    }
-    syncThicknessUI();
-    saveToLocalStorage();
-    if (window.QuartoInkExcalidraw && typeof window.QuartoInkExcalidraw.setCurrentItemStrokeWidth === 'function') {
-        window.QuartoInkExcalidraw.setCurrentItemStrokeWidth(w);
+    const target = quartoBaseWidthToExcalidrawStroke(state.strokeWidth);
+    if (Math.abs(target - w) >= 0.01 && window.QuartoInkExcalidraw && typeof window.QuartoInkExcalidraw.setCurrentItemStrokeWidth === 'function') {
+        window.QuartoInkExcalidraw.setCurrentItemStrokeWidth(target);
     }
 }
 
@@ -4302,11 +4270,11 @@ const state = {
     tool: 'pen',
     color: STROKE_BLACK,
     toolColors: { ...DEFAULT_TOOL_COLORS },
-    strokeWidth: 1.5,
+    strokeWidth: 0.8,
     thicknessIndex: 0,
-    thicknessPresets: [1.5, 3, 10],
+    thicknessPresets: [0.8, 2, 4],
     thicknessPresetsHighlighter: [4, 8, 16],
-    toolWidths: { pen: 1.5, highlighter: 8, eraser: ERASER_BASE_WIDTH_LOCKED, rect: 3, circle: 3, arrow: 3, line: 3 },
+    toolWidths: { pen: 0.8, highlighter: 8, eraser: ERASER_BASE_WIDTH_LOCKED, rect: 2, circle: 2, arrow: 2, line: 2 },
     opacity: 1,
     isFilled: false,
     lastBlobUrl: null,
@@ -4777,7 +4745,7 @@ function loadScriptOnce(src) {
 
 async function ensureExcalidrawRuntime() {
     window.EXCALIDRAW_ASSET_PATH = new URL('excalidraw-widget/dist/', window.location.href).href;
-    const src = 'excalidraw-widget/dist/quarto-ink-excalidraw.js?v=03af8dc029';
+    const src = 'excalidraw-widget/dist/quarto-ink-excalidraw.js?v=2931acc3dd';
     const vm = src.match(/[?&]v=([^&]+)/);
     const wantV = vm ? vm[1] : '';
     const ok =
@@ -4815,6 +4783,77 @@ function scheduleExcalidrawMetricsLayoutSync() {
     });
 }
 
+/**
+ * Excalidraw scenes are kept in the drawing layer's px, which depend on where the slide sits on
+ * this screen. Each scene records that slide box (`qiBox`), so in another layout (another
+ * screen or window size, a turned iPad, the sidebar, a shared file opened elsewhere) its ink is
+ * moved and scaled onto the slide as it sits there now.
+ */
+function usableSceneBox(b) {
+    return !!b && [b.x, b.y, b.width, b.height].every(Number.isFinite) && b.width > 50 && b.height > 30;
+}
+/** The slide box as the deck last reported it; null until it has. */
+function currentSceneBox() {
+    const b = state.slidesBox;
+    return usableSceneBox(b) ? { x: b.x, y: b.y, width: b.width, height: b.height } : null;
+}
+/** The slide box a stored scene was drawn in, or null. */
+function sceneBoxOf(raw) {
+    if (!raw) return null;
+    try {
+        const scene = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        return usableSceneBox(scene && scene.qiBox) ? scene.qiBox : null;
+    } catch (_e) {
+        return null;
+    }
+}
+function sameSceneBox(a, b) {
+    return Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.width - b.width) < 0.5;
+}
+/** A serialized scene from Excalidraw, marked with the slide box it was drawn in. */
+function tagSceneBox(serialized, box) {
+    if (typeof serialized !== 'string' || !usableSceneBox(box)) return serialized;
+    const at = serialized.indexOf('{');
+    if (at === -1 || serialized.indexOf('"qiBox"') !== -1) return serialized;
+    const tag = JSON.stringify({ x: box.x, y: box.y, width: box.width, height: box.height });
+    return `{"qiBox":${tag},${serialized.slice(at + 1)}`;
+}
+/** The scene with its ink moved and scaled from its slide box onto `box` (unchanged if the same). */
+function fitSceneToBox(raw, box) {
+    if (!raw || !usableSceneBox(box)) return raw;
+    let scene;
+    try { scene = typeof raw === 'string' ? JSON.parse(raw) : JSON.parse(JSON.stringify(raw)); } catch (_e) { return raw; }
+    if (!scene || !Array.isArray(scene.elements)) return raw;
+    const ref = scene.qiBox;
+    const cur = { x: box.x, y: box.y, width: box.width, height: box.height };
+    if (!usableSceneBox(ref)) {
+        // Drawn before slide boxes were recorded: take it as drawn here.
+        scene.qiBox = cur;
+        return JSON.stringify(scene);
+    }
+    if (sameSceneBox(ref, cur)) return raw;
+    const k = cur.width / ref.width;
+    const pt = (p) => [p[0] * k, p[1] * k];
+    scene.elements = scene.elements.map((el) => {
+        const e = {
+            ...el,
+            x: cur.x + (el.x - ref.x) * k,
+            y: cur.y + (el.y - ref.y) * k,
+            width: el.width * k,
+            height: el.height * k,
+            version: (el.version || 1) + 1,
+            versionNonce: Math.floor(Math.random() * 2147483647),
+        };
+        if (Array.isArray(el.points)) e.points = el.points.map(pt);
+        if (Array.isArray(el.lastCommittedPoint)) e.lastCommittedPoint = pt(el.lastCommittedPoint);
+        if (typeof el.strokeWidth === 'number') e.strokeWidth = el.strokeWidth * k;
+        if (typeof el.fontSize === 'number') e.fontSize = el.fontSize * k;
+        return e;
+    });
+    scene.qiBox = cur;
+    return JSON.stringify(scene);
+}
+
 function flushExcalidrawSceneToStorageForCurrentKey() {
     if (state.annotationEngine !== 'excalidraw' || !window.QuartoInkExcalidraw) return;
     // Save under the slide the mounted canvas belongs to; the current slide may already be ahead.
@@ -4825,7 +4864,7 @@ function flushExcalidrawSceneToStorageForCurrentKey() {
     if (typeof cap === 'function') {
         const serialized = cap();
         if (serialized) {
-            state.excalidrawScenes.set(key, serialized);
+            state.excalidrawScenes.set(key, tagSceneBox(serialized, state.mountedSceneBox));
             qiDebug('[Flush] Saved Excalidraw scene for key:', key, 'scenes total:', state.excalidrawScenes.size);
         } else {
             qiDebug('[Flush] captureSceneSerialized returned null for key:', key);
@@ -4918,7 +4957,25 @@ function syncAnnotationEngineMount() {
         armDeferredSlideChangeTimer();
         return;
     }
-    const scene = state.excalidrawScenes.get(slideKey) || null;
+    // The slide moved or resized under the mounted canvas: save it, and mount it again fitted.
+    const box = currentSceneBox();
+    if (state.lastMountedSlideKey === slideKey && box && state.mountedSceneBox && !sameSceneBox(box, state.mountedSceneBox) && !strokeId) {
+        flushExcalidrawSceneToStorageForCurrentKey();
+        window.QuartoInkExcalidraw.unmount();
+        state.lastMountedSlideKey = null;
+    }
+    let scene = state.excalidrawScenes.get(slideKey) || null;
+    if (scene && box) {
+        const fitted = fitSceneToBox(scene, box);
+        if (fitted !== scene) {
+            scene = fitted;
+            state.excalidrawScenes.set(slideKey, fitted);
+        }
+    }
+    // Saves from this canvas are in this box (the slide may move before a late save arrives).
+    // Before the deck has reported its slide box, the scene is shown as stored, in its own box.
+    const mountBox = box || sceneBoxOf(scene);
+    state.mountedSceneBox = mountBox;
     const m = state.slideMetrics || { x: 0, y: 0 };
     // Force full remount when slide key changes - the bundle's in-place swap
     // leaves the React component's slideKey closure stale, causing its debounced
@@ -4945,7 +5002,7 @@ function syncAnnotationEngineMount() {
                 qiDebug('[onSerializedChange] Dropping stale save for key:', targetKey, 'current:', getCurrentAnnotationKey());
                 return;
             }
-            state.excalidrawScenes.set(targetKey, serialized);
+            state.excalidrawScenes.set(targetKey, tagSceneBox(serialized, mountBox));
             saveToLocalStorage();
         },
         onStrokeColorFromExcalidraw: (hex) => {
@@ -5490,6 +5547,22 @@ function saveToolPrefs() {
     }
 }
 
+/**
+ * The pen's widths used to stand for three fixed Excalidraw widths (1.5, 3, 10 -> 1, 2, 4);
+ * now they are the widths themselves. Old default presets, and widths set from them, become
+ * the new defaults, which draw about the same.
+ */
+function migrateOldPenPresets() {
+    const p = state.thicknessPresets;
+    if (!Array.isArray(p) || !OLD_DEFAULT_PEN_PRESETS.every((v, i) => Number(p[i]) === v)) return;
+    state.thicknessPresets = DEFAULT_PEN_PRESETS.slice();
+    Object.keys(state.toolWidths).forEach((tool) => {
+        if (tool === 'highlighter' || tool === 'eraser') return;
+        const i = OLD_DEFAULT_PEN_PRESETS.indexOf(Number(state.toolWidths[tool]));
+        if (i !== -1) state.toolWidths[tool] = DEFAULT_PEN_PRESETS[i];
+    });
+}
+
 function loadFromLocalStorage() {
     try {
         const v2 = localStorage.getItem('gn_thickness_presets_v2');
@@ -5497,7 +5570,7 @@ function loadFromLocalStorage() {
             try {
                 const o = JSON.parse(v2);
                 if (Array.isArray(o.pen) && o.pen.length === 3) state.thicknessPresets = o.pen;
-                else state.thicknessPresets = [1.5, 3, 10];
+                else state.thicknessPresets = DEFAULT_PEN_PRESETS.slice();
                 if (Array.isArray(o.highlighter) && o.highlighter.length === 3) {
                     state.thicknessPresetsHighlighter = o.highlighter;
                 } else {
@@ -5510,7 +5583,7 @@ function loadFromLocalStorage() {
                 try {
                     const a = JSON.parse(presets);
                     if (Array.isArray(a) && a.length >= 3) {
-                        state.thicknessPresets = a.length === 3 ? a : [1.5, 3, 10];
+                        state.thicknessPresets = a.length === 3 ? a : DEFAULT_PEN_PRESETS.slice();
                     }
                 } catch (_e) {}
             }
@@ -5519,6 +5592,7 @@ function loadFromLocalStorage() {
         const widths = localStorage.getItem('gn_tool_widths');
         if (widths) state.toolWidths = JSON.parse(widths);
         state.toolWidths.eraser = ERASER_BASE_WIDTH_LOCKED;
+        migrateOldPenPresets();
 
         const toolColorsRaw = localStorage.getItem('gn_tool_colors');
         if (toolColorsRaw) {
@@ -6787,6 +6861,7 @@ window.processFileContent = function(content, file) {
     if (window.QuartoInkExcalidraw) window.QuartoInkExcalidraw.unmount();
     state.currentSlide = '0-0';
     state.slideMetrics = { x: 0, y: 0, width: 1, height: 1, scale: 1 };
+    state.slidesBox = null; // until this deck reports it (ink is fitted to it)
     state.slideMetricsBySlide = new Map();
     state.slides = extractSlidesFromHtml(content);
     state.slideCount = Math.max(state.slides.length, 1);
@@ -7334,6 +7409,8 @@ window.qiPinchGesture = qiPinchGesture;
 
 function tryNavigateFromSwipe(dx, dy, dt) {
     if (isPinchGestureActive()) return;
+    // Zoomed in on a slide or page: a finger stays on it (two fingers pan); 100% first.
+    if (window.QuartoInkWhiteboard && window.QuartoInkWhiteboard.isZoomed()) return;
     const minD = 40;
     const maxT = 1200;
     const ratio = 1.15;

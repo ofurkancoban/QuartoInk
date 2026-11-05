@@ -1876,6 +1876,26 @@ body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions fieldset {
     min-width: 0;
 }
 
+/* A slide zoomed with a pinch (assets/ui/quarto-ink-whiteboard.js): back to 100% */
+#qi-slide-zoom {
+    position: absolute;
+    left: 8px;
+    top: 8px;
+    z-index: 30;
+    padding: 6px 12px;
+    border: 1px solid var(--qi-line, rgba(0, 0, 0, 0.12));
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text);
+    font: 600 0.78rem/1 var(--font-sans, system-ui, sans-serif);
+    font-variant-numeric: tabular-nums;
+    box-shadow: 2px 2px 0 var(--qi-hard-shadow, rgba(0, 0, 0, 0.18));
+    cursor: pointer;
+}
+#qi-slide-zoom[hidden] { display: none; }
+/* The deck's tab buttons are laid over it at 100%: not while zoomed. */
+body.qi-slide-zoomed #tab-proxy-layer { display: none !important; }
+
 /* Pen and highlighter: the thickness slider in the place of "Layers" (assets/ui/quarto-ink-ui.js) */
 body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .qi-thickness-row {
     display: flex !important;

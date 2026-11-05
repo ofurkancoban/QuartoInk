@@ -271,4 +271,78 @@ describe('Blank pages', () => {
             await context.close();
         }
     });
+    it('zooms a slide with a pinch, the deck and its ink together', async (t) => {
+        if (process.env.QI_BROWSER === 'webkit') {
+            t.skip('touch input is emulated through Chromium');
+            return;
+        }
+        const context = await browser.newContext({ viewport: { width: 1280, height: 860 }, hasTouch: true });
+        const { page, errors } = await openApp(browser, server, { context });
+        const camera = () => page.evaluate(() => window.QuartoInkWhiteboard.camera());
+        const heading = () => page.frameLocator('#content-frame').locator('h1').first().boundingBox();
+        try {
+            await openDecks(page, [['zoom-slide.html', deckA]]);
+            await waitForDeck(page, 'zoom-slide.html');
+            await drawStroke(page, 0.7);
+            const before = await heading();
+            const ink = () => page.evaluate(() => {
+                const el = window.QuartoInkExcalidraw.getAPI().getSceneElements()[0];
+                return { x: el.x, y: el.y };
+            });
+            const stroke = await ink();
+
+            const box = await (await page.$('#editor-stage')).boundingBox();
+            const cx = box.x + box.width / 2;
+            const cy = box.y + box.height / 2;
+            const cdp = await context.newCDPSession(page);
+            const send = (type, touchPoints) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+            const pinch = async (from, to) => {
+                await send('touchStart', [{ x: cx - from, y: cy, id: 1 }, { x: cx + from, y: cy, id: 2 }]);
+                for (let i = 1; i <= 10; i++) {
+                    const d = from + ((to - from) * i) / 10;
+                    await send('touchMove', [{ x: cx - d, y: cy, id: 1 }, { x: cx + d, y: cy, id: 2 }]);
+                    await page.waitForTimeout(16);
+                }
+                await send('touchEnd', []);
+                await page.waitForTimeout(700);
+            };
+            await pinch(60, 120);
+            const cam = await camera();
+            assert.ok(cam.zoom > 1.7 && cam.zoom < 2.3, `zoomed to about 2x (${cam.zoom})`);
+            assert.match(await page.evaluate(() => document.getElementById('slide-indicator').textContent), /Slide: 1 \//, 'still the first slide');
+
+            // The deck is scaled and moved exactly like the ink: scene -> screen is (p + scroll) * zoom.
+            const host = await (await page.$('#excalidraw-host')).boundingBox();
+            const after = await heading();
+            const expectX = host.x + (before.x - host.x + cam.scrollX) * cam.zoom;
+            const expectY = host.y + (before.y - host.y + cam.scrollY) * cam.zoom;
+            assert.ok(Math.abs(after.x - expectX) < 2 && Math.abs(after.y - expectY) < 2, `deck lined up with the ink (${after.x},${after.y} vs ${expectX},${expectY})`);
+            assert.ok(Math.abs(after.width - before.width * cam.zoom) < 2, 'deck scaled like the ink');
+            assert.deepEqual(await ink(), stroke, 'the ink is kept at 100%');
+
+            // Zoomed in, a finger swipe stays on the slide.
+            await send('touchStart', [{ x: cx + 200, y: cy, id: 3 }]);
+            await send('touchMove', [{ x: cx, y: cy, id: 3 }]);
+            await send('touchMove', [{ x: cx - 200, y: cy, id: 3 }]);
+            await send('touchEnd', []);
+            await page.waitForTimeout(600);
+            assert.match(await page.evaluate(() => document.getElementById('slide-indicator').textContent), /Slide: 1 \//, 'no slide change while zoomed');
+
+            // Back to 100% from the button.
+            await page.click('#qi-slide-zoom');
+            await page.waitForFunction(() => window.QuartoInkWhiteboard.camera().zoom === 1);
+            assert.equal(await page.evaluate(() => document.getElementById('content-frame').style.transform), '');
+            assert.equal(await page.isVisible('#qi-slide-zoom'), false);
+
+            // Another slide is shown at 100%.
+            await pinch(60, 120);
+            assert.ok((await camera()).zoom > 1.5);
+            await page.keyboard.press('ArrowRight');
+            await page.waitForFunction(() => /Slide: 2 \//.test(document.getElementById('slide-indicator').textContent));
+            await page.waitForFunction(() => window.QuartoInkWhiteboard.camera().zoom === 1 && document.getElementById('content-frame').style.transform === '');
+            assert.deepEqual(errors, []);
+        } finally {
+            await context.close();
+        }
+    });
 });

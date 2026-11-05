@@ -259,7 +259,11 @@
      * Draw the ink saved under `annotationKey` onto a rendered slide. `box` is the slide box of
      * the normal layout (see enterPrintLayout), in which the Excalidraw scenes were drawn.
      */
-    async function drawInk(page, slideKey, annotationKey, box) {
+    /**
+     * `box`: the area of the drawing layer put on the page; `slideBox`: the slide box on screen,
+     * which the scene is fitted to first (it may have been drawn in another layout).
+     */
+    async function drawInk(page, slideKey, annotationKey, box, slideBox = box) {
         const { canvas, slideRect } = page;
         const ctx = canvas.getContext('2d');
         if (!(box.width > 4 && box.height > 4)) return;
@@ -269,7 +273,8 @@
         const ty = slideRect.y * k;
         const tw = slideRect.width * k;
         const th = slideRect.height * k;
-        const scene = state.excalidrawScenes.get(annotationKey);
+        let scene = state.excalidrawScenes.get(annotationKey);
+        if (typeof fitSceneToBox === 'function') scene = fitSceneToBox(scene, slideBox);
         if (sceneHasInk(scene) && window.QuartoInkExcalidraw && typeof window.QuartoInkExcalidraw.exportSerializedToSvg === 'function') {
             const serialized = typeof scene === 'string' ? scene : JSON.stringify(scene);
             const out = await window.QuartoInkExcalidraw.exportSerializedToSvg(serialized, box.width, box.height, box.x, box.y);
@@ -605,6 +610,9 @@
             return false;
         }
         if (typeof ensureExcalidrawRuntime === 'function') await ensureExcalidrawRuntime();
+        // A zoomed slide: back to 100%, as the export measures the deck's frame on screen.
+        const wb = window.QuartoInkWhiteboard;
+        if (wb && wb.isSlideZoomed()) wb.setCamera(0, 0, 1);
         if (state.annotationEngine === 'excalidraw') {
             try { flushExcalidrawSceneToStorageForCurrentKey(); } catch (_e) {}
         }
@@ -638,7 +646,7 @@
             } else {
                 page = await renderSlide();
             }
-            if (annotations) await drawInk(page, state.currentSlide, getCurrentAnnotationKey(), box);
+            if (annotations) await drawInk(page, state.currentSlide, getCurrentAnnotationKey(), box, saved.box);
             return page.canvas;
         } finally {
             await leavePrintLayout(saved);
@@ -749,7 +757,7 @@
                     // All of the page's ink, also what lies outside the slide area.
                     const fit = window.QuartoInkWhiteboard.exportBox(slideKey, board.id, layout.box);
                     const page = window.QuartoInkWhiteboard.renderPage(template, board.style, layout.size.width, { ...fit, slideBox: layout.box });
-                    await drawInk(page, slideKey, window.QuartoInkWhiteboard.keyOf(slideKey, board.id), fit.box);
+                    await drawInk(page, slideKey, window.QuartoInkWhiteboard.keyOf(slideKey, board.id), fit.box, layout.box);
                     const done = page.canvas;
                     const jpeg = canvasToBlob(done, 'image/jpeg', JPEG_QUALITY)
                         .then(async (blob) => new Uint8Array(await blob.arrayBuffer()))

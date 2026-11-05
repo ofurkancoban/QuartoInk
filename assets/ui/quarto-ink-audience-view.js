@@ -23,7 +23,7 @@
     const LASER_LIFE_MS = 1000; // a laser point fades out over this time
     const LASER_COLOR = '255, 0, 0'; // Excalidraw's laser red
 
-    let target = null; // { h, v, f, scope, whiteboard }
+    let target = null; // { h, v, f, scope, whiteboard, zoom }
     let slidesBox = null; // the deck's slide area, in this window's px
     let slideWidth = 0;
     let lastInk = null; // { bitmap, box, stage }
@@ -55,6 +55,25 @@
         targetMessages().forEach(toDeck);
         syncLensDeck();
         renderSheet();
+        renderZoom();
+    }
+
+    /**
+     * The presenter zoomed into the slide with a pinch: the same part of it here. The ink arrives
+     * zoomed already; the deck's frame is scaled about its corner so that its slide area's corner
+     * lands `dx`, `dy` slide widths from where it is at 100%.
+     */
+    function renderZoom() {
+        const z = target && target.zoom;
+        if (!z || !(z.zoom > 0) || !slidesBox || !(slidesBox.width > 0)) {
+            frame.style.removeProperty('transform');
+            frame.style.removeProperty('transform-origin');
+            return;
+        }
+        const tx = slidesBox.x + (z.dx || 0) * slidesBox.width - slidesBox.x * z.zoom;
+        const ty = slidesBox.y + (z.dy || 0) * slidesBox.width - slidesBox.y * z.zoom;
+        frame.style.transformOrigin = '0 0';
+        frame.style.transform = `translate(${tx}px, ${ty}px) scale(${z.zoom})`;
     }
 
     /** Slide units (fractions of the slide width, from its top-left) -> this window's px. */
@@ -221,7 +240,7 @@
                 }
                 document.body.classList.add('has-deck');
             } else if (data.type === 'qi-audience-slide') {
-                target = { h: data.h | 0, v: data.v | 0, f: data.f, scope: data.scope || '', whiteboard: data.whiteboard || null };
+                target = { h: data.h | 0, v: data.v | 0, f: data.f, scope: data.scope || '', whiteboard: data.whiteboard || null, zoom: data.zoom || null };
                 showTarget();
             } else if (data.type === 'qi-audience-ink' && data.bitmap) {
                 if (lastInk && lastInk.bitmap && lastInk.bitmap.close) lastInk.bitmap.close();
@@ -249,6 +268,7 @@
                 if (data.slidesBox) slidesBox = data.slidesBox;
                 if (data.computedSlideSize && data.computedSlideSize.width) slideWidth = data.computedSlideSize.width;
                 renderSheet();
+                renderZoom();
                 drawInk();
                 renderLens();
             } else if (data.type === 'INIT_STATE' || data.type === 'BRIDGE_READY_FOR_FOCUS') {
@@ -263,6 +283,7 @@
 
     window.addEventListener('resize', () => {
         renderSheet();
+        renderZoom();
         drawInk();
         renderLens();
         if (laserStrokes.length && !laserRaf) laserRaf = requestAnimationFrame(drawLaser);
