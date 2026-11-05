@@ -4015,12 +4015,72 @@ function nearestThicknessPresetIndexForWidth(widthPt) {
     return Math.min(2, Math.max(0, bestIdx));
 }
 
-function quartoBaseWidthToExcalidrawStroke(base) {
-    return quartoThicknessTierToExcalidrawStroke(nearestThicknessPresetIndexForWidth(base));
+/**
+ * Toolbar width (pt) -> Excalidraw stroke width. The three presets give Excalidraw's 1, 2 and 4
+ * exactly; widths between them (the panel's thickness slider) follow a straight line.
+ */
+const EXCAL_TIER_WIDTHS = [1, 2, 4];
+function thicknessPresetPoints() {
+    const p = getActiveThicknessPresets().slice(0, 3).map(Number);
+    return p.length === 3 && p[0] > 0 && p[0] < p[1] && p[1] < p[2] ? p : null;
 }
+function quartoBaseWidthToExcalidrawStroke(base) {
+    const p = thicknessPresetPoints();
+    const b = Number(base);
+    if (!p || !Number.isFinite(b)) return quartoThicknessTierToExcalidrawStroke(nearestThicknessPresetIndexForWidth(base));
+    const e = EXCAL_TIER_WIDTHS;
+    let w;
+    if (b <= p[0]) w = (e[0] * b) / p[0];
+    else if (b <= p[1]) w = e[0] + ((b - p[0]) / (p[1] - p[0])) * (e[1] - e[0]);
+    else if (b <= p[2]) w = e[1] + ((b - p[1]) / (p[2] - p[1])) * (e[2] - e[1]);
+    else w = (e[2] * b) / p[2];
+    return Math.round(Math.min(16, Math.max(0.25, w)) * 100) / 100;
+}
+/** Excalidraw stroke width -> toolbar width (pt): the inverse of quartoBaseWidthToExcalidrawStroke. */
+function excalidrawStrokeToQuartoBaseWidth(width) {
+    const p = thicknessPresetPoints();
+    const w = Number(width);
+    if (!p || !Number.isFinite(w)) return null;
+    const e = EXCAL_TIER_WIDTHS;
+    let b;
+    if (w <= e[0]) b = (p[0] * w) / e[0];
+    else if (w <= e[1]) b = p[0] + ((w - e[0]) / (e[1] - e[0])) * (p[1] - p[0]);
+    else if (w <= e[2]) b = p[1] + ((w - e[1]) / (e[2] - e[1])) * (p[2] - p[1]);
+    else b = (p[2] * w) / e[2];
+    return Math.round(b * 10) / 10;
+}
+
+/** The panel's thickness slider: its range (pt) for the active tool, and setting a width from it. */
+function strokeWidthSliderRange() {
+    const p = thicknessPresetPoints() || [1.5, 3, 10];
+    return { min: Math.round((p[0] / 3) * 10) / 10, max: p[2] * 2, step: 0.1, value: Number(state.strokeWidth) };
+}
+function setToolStrokeWidth(widthPt) {
+    if (state.tool === 'eraser') return;
+    const range = strokeWidthSliderRange();
+    const val = Math.min(range.max, Math.max(range.min, Number(widthPt)));
+    if (!Number.isFinite(val)) return;
+    state.strokeWidth = val;
+    if (state.toolWidths[state.tool] !== undefined) state.toolWidths[state.tool] = val;
+    syncThicknessUI();
+    saveToLocalStorage();
+    if (state.annotationEngine === 'excalidraw') syncToolbarStrokeToExcalidraw();
+}
+window.qiStrokeWidth = { range: strokeWidthSliderRange, set: setToolStrokeWidth };
 
 /** Island / Excal → main toolbar: snap to exact preset pt for the tier (1:1 sync). */
 function syncMainToolbarThicknessFromExcalPenTier(excalNorm) {
+    // A width between the presets (from the thickness slider): keep it as it is.
+    const between = excalidrawStrokeToQuartoBaseWidth(excalNorm);
+    if (between != null && !EXCAL_TIER_WIDTHS.includes(Number(excalNorm))) {
+        if (Math.abs(Number(state.strokeWidth) - between) >= 0.05) {
+            state.strokeWidth = between;
+            if (state.toolWidths[state.tool] !== undefined) state.toolWidths[state.tool] = between;
+            syncThicknessUI();
+            saveToLocalStorage();
+        }
+        return;
+    }
     const tier = excalPenNormalizedWidthToThicknessTier(excalNorm);
     if (tier == null) return;
     const presets = getActiveThicknessPresets();
@@ -4196,8 +4256,13 @@ function syncThicknessUI() {
     });
     const slider = _$('#stroke-width-slider');
     const label = _$('#thickness-val');
-    if (slider) slider.value = state.strokeWidth;
-    if (label) label.textContent = `${state.strokeWidth}pt`;
+    if (slider) {
+        const range = strokeWidthSliderRange();
+        slider.min = String(range.min);
+        slider.max = String(range.max);
+        slider.value = state.strokeWidth;
+    }
+    if (label) label.textContent = `${Math.round(state.strokeWidth * 10) / 10} pt`;
     if (group) group.classList.toggle('is-disabled', eraserLocked);
     if (slider) slider.disabled = eraserLocked;
     _$$('.gn-thickness-btn').forEach((btn) => {
@@ -4712,7 +4777,7 @@ function loadScriptOnce(src) {
 
 async function ensureExcalidrawRuntime() {
     window.EXCALIDRAW_ASSET_PATH = new URL('excalidraw-widget/dist/', window.location.href).href;
-    const src = 'excalidraw-widget/dist/quarto-ink-excalidraw.js?v=d963634a4d';
+    const src = 'excalidraw-widget/dist/quarto-ink-excalidraw.js?v=03af8dc029';
     const vm = src.match(/[?&]v=([^&]+)/);
     const wantV = vm ? vm[1] : '';
     const ok =
@@ -9099,23 +9164,6 @@ function setupEventListeners() {
             saveToLocalStorage();
             if (state.annotationEngine === 'excalidraw') syncToolbarStrokeToExcalidraw();
         };
-    });
-
-    _on('#stroke-width-slider', 'input', (e) => {
-        if (state.tool === 'eraser') {
-            e.target.value = ERASER_BASE_WIDTH_LOCKED;
-            return;
-        }
-        const val = parseFloat(e.target.value);
-        state.strokeWidth = val;
-        const presets = getActiveThicknessPresets();
-        if (presets[state.thicknessIndex] !== undefined) presets[state.thicknessIndex] = val;
-        if (state.toolWidths[state.tool] !== undefined) {
-            state.toolWidths[state.tool] = val;
-        }
-        syncThicknessUI();
-        saveToLocalStorage();
-        if (state.annotationEngine === 'excalidraw') syncToolbarStrokeToExcalidraw();
     });
 
     // Close popovers on outside click

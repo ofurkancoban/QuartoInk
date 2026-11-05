@@ -91,6 +91,47 @@ describe('Interface details', () => {
         }
     });
 
+    it('puts a thickness slider in place of Layers for the pen', async () => {
+        const { page, context, errors } = await openApp(browser, server);
+        try {
+            await openDecks(page, [['a.html', deckA]]);
+            await waitForDeck(page, 'a.html');
+            await page.click('#btn-pen');
+            await page.waitForSelector('#qi-panel-thickness input');
+            const groups = await page.$$eval('#excalidraw-host .selected-shape-actions fieldset',
+                (list) => list.filter((f) => getComputedStyle(f).display !== 'none').map((f) => f.querySelector('legend').textContent.trim()));
+            assert.deepEqual(groups, ['Stroke width', 'Thickness'], 'no Layers');
+            const box = await (await page.$('#qi-panel-thickness input')).boundingBox();
+            assert.ok(box.width >= 140, `slider wide enough (${box.width})`);
+
+            // A width between the presets, used by the next stroke.
+            await page.mouse.click(box.x + box.width * 0.35, box.y + box.height / 2);
+            await page.waitForFunction(() => {
+                const w = window.QuartoInkExcalidraw.getAPI().getAppState().currentItemStrokeWidth;
+                return w > 2 && w < 4;
+            });
+            const chosen = await page.evaluate(() => state.strokeWidth);
+            assert.equal(await page.textContent('#thickness-val'), `${chosen} pt`);
+            await page.keyboard.press('Escape');
+            await page.mouse.click(5, 5);
+            await drawStroke(page, 0.6);
+            const widths = await page.evaluate(() => window.QuartoInkExcalidraw.getAPI().getSceneElements().map((e) => e.strokeWidth));
+            assert.ok(widths.length === 1 && widths[0] > 2 && widths[0] < 4, `stroke between medium and thick (${widths})`);
+
+            // The presets still give Excalidraw's widths exactly.
+            await page.click('.gn-thickness-btn[data-index="2"]');
+            await page.waitForFunction(() => window.QuartoInkExcalidraw.getAPI().getAppState().currentItemStrokeWidth === 4);
+
+            // Other tools keep Layers.
+            await page.click('#btn-rect');
+            await page.click('#btn-rect');
+            await page.waitForFunction(() => !document.getElementById('qi-panel-thickness'));
+            assert.deepEqual(errors, []);
+        } finally {
+            await context.close();
+        }
+    });
+
     it('hides the opacity slider and names the pen fill', async () => {
         const { page, context, errors } = await openApp(browser, server);
         try {

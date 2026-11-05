@@ -549,9 +549,11 @@ function rememberTextStyle() {
   } catch {}
 }
 
+/** Any width the host's thickness slider gives (its presets are Excalidraw's 1, 2 and 4). */
 function normalizeStrokeWidth(val) {
   const num = Number(val);
-  return Number.isFinite(num) ? (num <= 1.25 ? 1 : num <= 2.5 ? 2 : 4) : 2;
+  if (!Number.isFinite(num) || num <= 0) return 2;
+  return Math.round(Math.min(16, Math.max(0.25, num)) * 100) / 100;
 }
 
 const HIGHLIGHTER_SIZE_OPACITY = 30;

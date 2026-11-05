@@ -336,6 +336,45 @@ describe('Quarto Ink app', () => {
         });
     });
 
+    it('keeps the slide when the Pencil or a resting palm touches the slide ruler', async () => {
+        await withDeck(async ({ page }) => {
+            const slide = () => page.evaluate(() => /Slide: (\d+)/.exec(document.getElementById('slide-indicator').textContent)[1]);
+            // Pointer input on the ruler as an iPad sends it.
+            const press = (type, at, { hold = 50, moveTo = null, id = 7 } = {}) => page.evaluate(async ({ type, at, hold, moveTo, id }) => {
+                const ruler = document.getElementById('qi-slide-ruler');
+                const r = ruler.querySelector('.qi-ruler-track').getBoundingClientRect();
+                const x = r.left + r.width * at;
+                const y = r.top + r.height / 2;
+                const fire = (name, cx) => ruler.dispatchEvent(new PointerEvent(name, { pointerId: id, pointerType: type, clientX: cx, clientY: y, bubbles: true, isPrimary: true }));
+                fire('pointerdown', x);
+                if (moveTo != null) fire('pointermove', r.left + r.width * moveTo);
+                await new Promise((res) => setTimeout(res, hold));
+                fire('pointerup', moveTo != null ? r.left + r.width * moveTo : x);
+            }, { type, at, hold, moveTo, id });
+            const settle = () => page.waitForTimeout(400);
+
+            await press('pen', 0.76);
+            await settle();
+            assert.equal(await slide(), '1', 'the Pencil does not move the slide');
+
+            await press('touch', 0.76, { hold: 700 });
+            await settle();
+            assert.equal(await slide(), '1', 'a resting palm does not move the slide');
+
+            // A quick tap right after writing is the palm too.
+            await page.evaluate(() => window.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'pen', bubbles: true })));
+            await press('touch', 0.76);
+            await settle();
+            assert.equal(await slide(), '1', 'a palm landing just after the Pencil does not move the slide');
+
+            await page.waitForTimeout(1100);
+            await press('touch', 0.76);
+            await page.waitForFunction(() => /Slide: 4 \/ 5/.test(document.getElementById('slide-indicator').textContent));
+            await press('touch', 0.3, { moveTo: 0.01, hold: 700 });
+            await page.waitForFunction(() => /Slide: 1 \/ 5/.test(document.getElementById('slide-indicator').textContent));
+        });
+    });
+
     it('switches tools, modes, theme and dock position', async () => {
         await withDeck(async ({ page }) => {
             for (const id of ['#btn-highlighter', '#btn-rect', '#btn-pen']) {

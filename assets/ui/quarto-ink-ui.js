@@ -65,27 +65,50 @@
             if (slide && typeof goToSlide === 'function') goToSlide(slide);
         }
 
-        let dragging = false;
+        // On a tablet the ruler sits where the hand rests while writing: the Pencil never moves
+        // the slide, and a finger only by a quick tap or a sideways drag, not while the Pencil
+        // was just writing (the palm).
+        const PALM_AFTER_PEN_MS = 1000;
+        const TAP_MS = 400;
+        const MOVE_PX = 10;
+        let lastPenAt = 0;
+        window.addEventListener('pointerdown', function (e) { if (e.pointerType === 'pen') lastPenAt = performance.now(); }, true);
+        window.addEventListener('pointerup', function (e) { if (e.pointerType === 'pen') lastPenAt = performance.now(); }, true);
+
+        let press = null; // { id, x, t, touch, dragging }
         let lastIndex = -1;
         ruler.addEventListener('pointerdown', function (e) {
             if (!ruler.classList.contains('is-ready')) return;
-            dragging = true;
+            if (e.pointerType === 'pen') return;
+            const touch = e.pointerType === 'touch';
+            if (touch && performance.now() - lastPenAt < PALM_AFTER_PEN_MS) return;
+            press = { id: e.pointerId, x: e.clientX, t: performance.now(), touch: touch, dragging: !touch };
             lastIndex = indexAt(e.clientX).index;
             try { ruler.setPointerCapture(e.pointerId); } catch (_e) {}
-            jump(e.clientX);
+            // A mouse jumps at once; a finger waits to show it meant to.
+            if (!touch) jump(e.clientX);
         });
         ruler.addEventListener('pointermove', function (e) {
-            showTip(e.clientX);
-            if (!dragging) return;
+            if (e.pointerType !== 'pen') showTip(e.clientX);
+            if (!press || e.pointerId !== press.id) return;
+            if (!press.dragging) {
+                // A resting palm hardly moves; a finger scrubbing the ruler moves sideways.
+                if (Math.abs(e.clientX - press.x) < MOVE_PX) return;
+                press.dragging = true;
+            }
             const i = indexAt(e.clientX).index;
             if (i !== lastIndex) {
                 lastIndex = i;
                 jump(e.clientX);
             }
         });
-        const stop = function () { dragging = false; };
-        ruler.addEventListener('pointerup', stop);
-        ruler.addEventListener('pointercancel', stop);
+        ruler.addEventListener('pointerup', function (e) {
+            if (!press || e.pointerId !== press.id) return;
+            const tap = press.touch && !press.dragging && performance.now() - press.t < TAP_MS;
+            press = null;
+            if (tap) jump(e.clientX);
+        });
+        ruler.addEventListener('pointercancel', function () { press = null; });
 
         new MutationObserver(render).observe(indicator, {
             childList: true,
@@ -131,6 +154,58 @@
     // how the highlighter is recognised), so the panel's opacity slider never had an effect:
     // hide it. For pen and highlighter, "Background" only fills strokes that close into a
     // loop (and shapes made with Ink to Shape), so label it accordingly.
+    // Pen and highlighter: "Layers" (the order of selected shapes) has nothing to act on while
+    // writing, so a thickness slider takes its place, for widths between the three presets.
+    const THICKNESS_ID = 'qi-panel-thickness';
+    function syncThicknessSlider(panel, freehand) {
+        const layers = Array.from(panel.querySelectorAll('fieldset')).find((f) => {
+            const legend = f.querySelector(':scope > legend, :scope > h3');
+            return legend && legend.textContent.trim() === 'Layers';
+        });
+        if (layers) {
+            if (freehand && layers.dataset.qiHidden !== '1') {
+                layers.dataset.qiHidden = '1';
+                layers.style.setProperty('display', 'none', 'important');
+            } else if (!freehand && layers.dataset.qiHidden === '1') {
+                delete layers.dataset.qiHidden;
+                layers.style.removeProperty('display');
+            }
+        }
+        let box = panel.querySelector('#' + THICKNESS_ID);
+        const api = window.qiStrokeWidth;
+        if (!freehand || !api) {
+            if (box) box.remove();
+            return;
+        }
+        if (!box) {
+            box = document.createElement('fieldset');
+            box.id = THICKNESS_ID;
+            box.className = 'qi-panel-thickness';
+            box.dataset.qiOwn = '1';
+            box.innerHTML = '<legend>Thickness</legend>'
+                + '<div class="qi-thickness-row">'
+                + '<input type="range" id="stroke-width-slider" aria-label="Thickness">'
+                + '<span id="thickness-val" class="qi-thickness-val" aria-hidden="true"></span>'
+                + '</div>';
+            const slider = box.querySelector('input');
+            slider.addEventListener('input', () => api.set(parseFloat(slider.value)));
+            // Arrow keys move the slider, not the slides.
+            slider.addEventListener('keydown', (e) => e.stopPropagation());
+            const column = (layers && layers.parentElement) || panel.querySelector('.panelColumn') || panel;
+            column.insertBefore(box, layers ? layers.nextSibling : null);
+        }
+        const range = api.range();
+        const slider = box.querySelector('input');
+        slider.min = String(range.min);
+        slider.max = String(range.max);
+        slider.step = String(range.step);
+        if (document.activeElement !== slider) slider.value = String(range.value);
+        // Only when it changed: this runs from a MutationObserver on the panel.
+        const label = box.querySelector('.qi-thickness-val');
+        const text = (Math.round(range.value * 10) / 10) + ' pt';
+        if (label.textContent !== text) label.textContent = text;
+    }
+
     const FILL_LABEL = 'Fill (closed strokes)';
     const FILL_HINT = 'Fills the inside of a stroke that closes into a loop, and of shapes created with Ink to Shape.';
     function tweakPropertyPanel(host) {
@@ -145,6 +220,7 @@
         });
         const tool = document.body.dataset.tool;
         const freehand = tool === 'pen' || tool === 'highlighter';
+        syncThicknessSlider(panel, freehand);
         panel.querySelectorAll('h3').forEach((h) => {
             const text = h.textContent.trim();
             if (freehand && text === 'Background') {

@@ -1876,6 +1876,32 @@ body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions fieldset {
     min-width: 0;
 }
 
+/* Pen and highlighter: the thickness slider in the place of "Layers" (assets/ui/quarto-ink-ui.js) */
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .qi-thickness-row {
+    display: flex !important;
+    align-items: center;
+    gap: 10px;
+    height: 36px;
+    padding: 0 10px;
+    border-radius: 12px;
+    background: var(--hover-bg);
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .qi-thickness-row input[type="range"] {
+    width: 150px !important;
+    min-width: 150px !important;
+    margin: 0 !important;
+    accent-color: var(--accent);
+    touch-action: none; /* a finger or the Pencil drags the thumb, not the page */
+    cursor: pointer;
+}
+body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .qi-thickness-val {
+    min-width: 44px;
+    font: 500 0.75rem/1 var(--font-mono, ui-monospace, monospace);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-secondary);
+    text-align: right;
+}
+
 /* Colours: ink drops, the chosen one gets an inked ring */
 body[data-theme] #excalidraw-host .excalidraw .selected-shape-actions .color-picker__top-picks {
     gap: 7px !important;
